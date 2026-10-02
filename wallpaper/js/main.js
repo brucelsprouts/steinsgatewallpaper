@@ -10,7 +10,8 @@
   // ?still=3.2 renders a single frame that many seconds after boot, ?shiftAt=5 fires
   // a worldline shift then, ?cursor=0.8,-0.4 pins the parallax camera, ?worldline=1.048596
   // pins the starting worldline, ?seed=3 picks the ink (stills and recordings use 1),
-  // ?inkRest=20 shortens how long each bloom of ink rests before dissolving.
+  // ?inkRest=20 shortens how long each bloom of ink rests before dissolving,
+  // ?inkBlend=overlay&inkGain=0.6 lays the ink on another way, ?speed=5 runs time faster.
   const fakeNow = q.get('now') ? new Date(q.get('now')).getTime() : null;
   const still = q.has('still') ? Number(q.get('still')) : null;
   const shiftAt = q.has('shiftAt') ? Number(q.get('shiftAt')) : null;
@@ -22,7 +23,11 @@
   const clock = () => new Date(fakeNow != null ? fakeNow + simT * 1000 : Date.now());
   const theme = () => (Config.get('glow') === 'white' ? 'cold' : 'warm');
 
-  const scene = new Scene.Scene(Kit.rng(seed), inkRest != null ? { rest: [inkRest, inkRest] } : {});
+  const scene = new Scene.Scene(Kit.rng(seed), {
+    rest: inkRest != null ? [inkRest, inkRest] : undefined,
+    blend: q.get('inkBlend') || undefined,
+    gain: q.has('inkGain') ? Number(q.get('inkGain')) : undefined,
+  });
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
   const controller = new Display.Controller(meter, clock);
   const smoke = new Atmos.Smoke(), light = new Atmos.Light();
@@ -110,17 +115,22 @@
   }
 
   // ---------- Loop: capped frame rate, fully stopped while paused or hidden ----------
-  const t0 = performance.now();
-  const elapsed = () => (performance.now() - t0) / 1000;
-  let raf = 0, last = 0, hostPaused = false;
+  // Seconds since boot; a preview may run time faster (?speed=5 or SG.speed(5)).
+  let speed = Number(q.get('speed')) > 0 ? Number(q.get('speed')) : 1, base = 0, mark = performance.now();
+  const elapsed = (ms = performance.now()) => base + (ms - mark) / 1000 * speed;
+  let raf = 0, last = 0, hostPaused = false, cost = 0, frames = 0;
 
   function frame(nowMs) {
     raf = requestAnimationFrame(frame);
     if (nowMs - last < 1000 / Config.fps() - 2) return;
     last = nowMs;
-    const t = (nowMs - t0) / 1000;
+    const t = Math.max(lastT, elapsed(nowMs)), c0 = performance.now();
     step(t);
     render(t);
+    // What a frame costs, for the preview; the first second (textures going up to the
+    // GPU, ink still being painted) is left out.
+    const ms = performance.now() - c0;
+    if (++frames > 30) cost = cost ? cost + (ms - cost) * 0.05 : ms;
   }
   const running = () => raf !== 0;
   function start() { if (!running()) { last = 0; raf = requestAnimationFrame(frame); } }
@@ -160,16 +170,27 @@
     syncRunning();
   }
 
-  // Console helpers: SG.shift() triggers a worldline shift, SG.ink() brings fresh ink.
-  // The rest drive recordings.
+  // Console helpers: SG.shift() triggers a worldline shift, SG.ink() brings fresh ink
+  // (SG.ink('blot') a given kind). The rest drive recordings and tools/preview.html.
   let simLast = 0;
+  const simNow = () => (manual ? simLast : elapsed());
   window.SG = {
     config: Config,
-    shift: () => controller.shift(manual ? simLast : elapsed()),
-    ink: () => scene.ink.shift(manual ? simLast : elapsed()),
-    click: () => controller.click(manual ? simLast : elapsed()),
+    shift: () => controller.shift(simNow()),
+    ink: kind => scene.ink.shift(simNow(), kind)?.kind ?? null,
+    click: () => controller.click(simNow()),
     pointer: (x, y) => scene.pointer(x, y),
-    state: () => ({ target: meter.target, shifting: meter.shifting, worldline: controller.worldline, ink: scene.ink.blooms.length }),
+    speed(s) { if (s > 0) { base = elapsed(); mark = performance.now(); speed = s; } },
+    paint(style) {
+      scene.ink.style({ blend: scene.ink.blend, gain: scene.ink.gain, ...style });
+      if (!running()) render(lastT);
+    },
+    state: () => ({
+      target: meter.target, shifting: meter.shifting, worldline: controller.worldline,
+      t: lastT, seed, speed, running: running(), ms: cost, frames,
+      paint: { blend: scene.ink.blend, gain: scene.ink.gain },
+      ink: scene.ink.blooms.map(b => ({ kind: b.kind, color: b.color, rgb: Ink.INKS[b.color], phase: b.phase(lastT)[0] })),
+    }),
     renderAt(t) {
       for (let s = simLast + 1 / 30; s < t; s += 1 / 30) step(s);
       step(t);

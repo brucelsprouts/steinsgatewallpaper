@@ -81,14 +81,29 @@ in Lively's settings.
 
 ## Development
 
-Preview in a browser:
+### Preview
 
 ```bash
 node tools/serve.js
 ```
 
-Then open <http://localhost:5173/wallpaper/>. In the browser console, `SG.shift()` triggers
-a shift, `SG.click()` simulates a click, `SG.ink()` throws fresh ink and `SG.state()`
+Then open <http://localhost:5173/>. The preview shows the live wallpaper scaled to fit the
+window, rendered at your screen's resolution or another one (1080p, 1440p, 4K, ultrawide,
+16:10), with:
+
+- the three settings, applied the way Wallpaper Engine applies them;
+- buttons to shift the worldline, click, pause, or form a given kind of ink right now
+  (keys S, C, P and 1–4);
+- time at 1×, 5× or 25×, to watch ink form, rest and dissolve;
+- how the ink is laid on (Screen or Overlay) and how strongly, for comparing;
+- restart, new ink, full screen (F), hiding the controls (H) and saving the frame as a PNG.
+
+Its choices stay in the page's URL, so a reload or a copied link comes back to the same view.
+
+The wallpaper on its own is at <http://localhost:5173/wallpaper/>. In the browser console
+there, `SG.shift()` triggers a shift, `SG.click()` simulates a click, `SG.ink()` throws
+fresh ink (`SG.ink('blot')` a given kind), `SG.speed(5)` runs time faster,
+`SG.paint({ blend: 'overlay', gain: 1 })` changes how the ink is laid on and `SG.state()`
 shows what the tubes and ink are doing.
 
 URL parameters:
@@ -102,9 +117,12 @@ URL parameters:
   - `worldline=1.048596` sets the starting worldline
   - `seed=3` picks the ink (stills and recordings use 1)
   - `inkRest=20` shortens how long each element of ink rests before it dissolves
+  - `inkBlend=screen|overlay` and `inkGain=0.8` change how the ink is laid on
+  - `speed=5` runs time five times faster
 
 Tools (the screenshot and recording tools need `tools/serve.js` running):
 
+- `tools/preview.html`: the preview above (the repo root opens it)
 - `node tools/test.js`: behaviour checks for the display, shift and ink scheduling logic
 - `tools/ink.html`: elements of ink in isolation, at rest, forming or dissolving, for tuning
 - `tools/shoot.sh <page> <out.png> [query]`: headless Chrome screenshot

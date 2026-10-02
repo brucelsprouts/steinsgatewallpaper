@@ -63,6 +63,10 @@ const Ink = (() => {
   const EDGE = 0.07;       // softness of the edge once it has dried
   const TINT = 0.3;        // how strongly an element stains the linework under it
   const SHIMMER = 0.3;     // how much the pigment keeps shifting once formed
+  const GAIN = 0.8;        // overall strength of the ink (the preview can change it)
+  // Overlay only shows where something is lit, so in that style the ink goes on thick
+  // over the clockwork and the glow, and only a thin wash of it stays over the dark.
+  const OVERLAY = { over: 2.5, wash: 0.35 };
 
   // ---------- Textures shared by every element ----------
 
@@ -723,6 +727,15 @@ const Ink = (() => {
       this.next = null;
       this.lastKind = null;
       this.S = 0;
+      this.style(o);
+    }
+
+    // How the ink meets the scene. 'screen' lays it over the dark as luminous paint;
+    // 'overlay' only colours what is lit (the clockwork, the glow), like a texture laid
+    // over a key visual in overlay mode. `gain` scales its strength.
+    style({ blend = 'screen', gain = GAIN } = {}) {
+      this.blend = blend === 'overlay' ? 'overlay' : 'screen';
+      this.gain = Math.max(0, Number(gain) || 0);
     }
 
     // A kind by weight, never the same twice running.
@@ -770,13 +783,16 @@ const Ink = (() => {
       this.next = t + 3 + r() * 3;
     }
 
-    // A worldline shift throws a splash, and the oldest resting element dissolves.
-    shift(t) {
-      if (this.next == null) return;
+    // A worldline shift throws a splash (the preview may ask for any kind), and the
+    // oldest resting element dissolves to make room. Returns the new element, or null
+    // when every zone or colour is still taken.
+    shift(t, kind = 'splash') {
+      if (this.next == null) return null;
       const resting = this.blooms.filter(b => b.phase(t)[0] === 'resting').sort((a, b) => a.born - b.born);
       if (resting.length && this.active(t) >= MAX) resting[0].fadeFrom(t);
-      this.spawn(t, 'splash');
+      const b = this.spawn(t, kind);
       this.next = Math.max(this.next, t + GAP[0]);
+      return b;
     }
 
     // Elements not yet dissolving: new ones are planned around these, so a fresh one
@@ -830,13 +846,26 @@ const Ink = (() => {
       }
     }
 
-    // Two passes. 'glow' lays the ink's own colour over the dark ('screen'); 'tint'
-    // stains whatever was drawn before it in the ink's hue ('color'), the way washes
-    // colour the linework of a painted key visual. `pick(element)` selects which.
+    // Two passes around the clockwork each element sits with. 'under' goes before it
+    // and lays the ink's own colour over the dark ('screen'); 'over' goes after it and
+    // stains whatever is there in the ink's hue ('color'), the way washes colour the
+    // linework of a painted key visual. In overlay style most of the colour goes over
+    // as well ('overlay'), so it shows mainly where something is lit. `pick(element)`
+    // selects which elements.
     draw(ctx, view, t, pass, pick) {
+      const g = this.gain, overlay = this.blend === 'overlay';
+      if (pass === 'under') this.lay(ctx, view, t, pick, 'screen', overlay ? g * OVERLAY.wash : g);
+      else {
+        if (overlay) this.lay(ctx, view, t, pick, 'overlay', g * OVERLAY.over);
+        this.lay(ctx, view, t, pick, 'color', g);
+      }
+    }
+
+    // One pass of every picked element, `k` times its own strength.
+    lay(ctx, view, t, pick, op, k) {
       const P = 42, S = view.S;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = pass === 'tint' ? 'color' : 'screen';
+      ctx.globalCompositeOperation = op;
       for (const b of this.blooms) {
         if (!b.now || !pick(b)) continue;
         const a1 = hash(b.seed, 1) * TAU, a2 = hash(b.seed, 2) * TAU;
@@ -844,10 +873,10 @@ const Ink = (() => {
         const dy = Math.cos(t / 107 + a2) * 5.6 - b.cam.y * P * b.depth * 0.7;
         const box = [view.ox + (b.x + b.sp.x0 + dx) * S, view.oy + (b.y + b.sp.y0 + dy) * S, b.sp.w * S, b.sp.h * S];
         const breathe = 1 + 0.06 * Math.sin(t / 41 + a1);
-        ctx.globalAlpha = Math.min(1, (pass === 'tint' ? TINT : b.alpha) * b.now.glow * breathe);
+        ctx.globalAlpha = Math.min(1, (op === 'color' ? TINT : b.alpha) * k * b.now.glow * breathe);
         ctx.drawImage(b.live.reveal, ...box);
-        if (pass === 'glow') {
-          ctx.globalAlpha = Math.min(1, b.alpha * 1.3 * b.now.fadeIn * breathe);
+        if (op !== 'color') {
+          ctx.globalAlpha = Math.min(1, b.alpha * 1.3 * k * b.now.fadeIn * breathe);
           ctx.drawImage(b.live.boost, ...box);
         }
       }
@@ -856,5 +885,5 @@ const Ink = (() => {
     }
   }
 
-  return { Field, ZONES, KINDS, MAX };
+  return { Field, ZONES, KINDS, INKS, MAX };
 })();

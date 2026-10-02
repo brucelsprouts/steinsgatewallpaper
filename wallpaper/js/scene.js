@@ -140,9 +140,9 @@ const Scene = (() => {
       const deep = b => b.depth < METER.depth;
       ctx.save();
       this.ink.frame(t);
-      this.ink.draw(ctx, view, t, 'glow', deep);
+      this.ink.draw(ctx, view, t, 'under', deep);
       for (const it of this.items) if (it.depth < METER.depth) it.draw(ctx, view, t, now, this.shifts);
-      this.ink.draw(ctx, view, t, 'tint', deep);
+      this.ink.draw(ctx, view, t, 'over', deep);
       ctx.restore();
       const m = this.meterOffset(t), w = this.clearing.width / (view.S * 0.25), h = this.clearing.height / (view.S * 0.25);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -154,8 +154,8 @@ const Scene = (() => {
     drawFront(ctx, view, t, now) {
       const near = b => b.depth >= METER.depth;
       ctx.save();
-      this.ink.draw(ctx, view, t, 'glow', near);
-      this.ink.draw(ctx, view, t, 'tint', near);
+      this.ink.draw(ctx, view, t, 'under', near);
+      this.ink.draw(ctx, view, t, 'over', near);
       for (const it of this.items) if (it.depth >= METER.depth) it.draw(ctx, view, t, now, this.shifts);
       const m = this.meterOffset(t);
       this.dust.draw(ctx, view, t, { x: METER.cx + m.x, y: METER.cy + m.y });

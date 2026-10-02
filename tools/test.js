@@ -232,5 +232,27 @@ test('ink: a worldline shift throws a splash and dissolves the oldest', () => {
   assert.ok(!f.blooms.includes(oldest));
 });
 
+test('ink: the preview can ask for any kind, and is told when there is no room', () => {
+  const { Kit, Ink } = loadInk();
+  const f = new Ink.Field(Kit.rng(5), { x: 0, y: 0 });
+  simulate(f, 20, () => {});
+  const made = [];
+  for (let i = 0; i < 12; i++) made.push(f.shift(20, 'blot'));
+  assert.ok(made[0] && made[0].kind === 'blot');
+  assert.ok(made.includes(null), 'never ran out of zones or colours');
+  assert.strictEqual(new Set(f.blooms.map(b => b.zone)).size, f.blooms.length);
+});
+
+test('ink: paint style defaults lighter, and only knows screen and overlay', () => {
+  const { Kit, Ink } = loadInk();
+  const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
+  assert.strictEqual(f.blend, 'screen');
+  assert.ok(f.gain > 0.5 && f.gain < 1, `default gain ${f.gain}`);
+  f.style({ blend: 'overlay', gain: '1.2' });
+  assert.deepStrictEqual([f.blend, f.gain], ['overlay', 1.2]);
+  f.style({ blend: 'difference', gain: -3 });
+  assert.deepStrictEqual([f.blend, f.gain], ['screen', 0]);
+});
+
 process.exitCode = failures ? 1 : 0;
 console.log(failures ? `${failures} failing` : 'all passing');

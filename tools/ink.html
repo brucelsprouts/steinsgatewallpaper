@@ -41,8 +41,8 @@ const view = (cx, cy) => ({ S, ox: cx, oy: cy, W: cv.width, H: cv.height });
 function show(b, cx, cy, t) {
   field.blooms = [b];
   field.frame(t);
-  field.draw(ctx, view(cx, cy), t, 'glow', () => true);
-  field.draw(ctx, view(cx, cy), t, 'tint', () => true);
+  field.draw(ctx, view(cx, cy), t, 'under', () => true);
+  field.draw(ctx, view(cx, cy), t, 'over', () => true);
 }
 
 if (mode === 'sheet') {
