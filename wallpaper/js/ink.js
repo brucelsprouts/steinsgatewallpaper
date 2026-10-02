@@ -1,14 +1,16 @@
 'use strict';
-// Living ink: coloured watercolour that forms on its own. A bead of pigment lands,
-// spreads with a wet front, dries, rests for a few minutes and then dissolves while
-// new blooms form elsewhere. Each bloom is painted once into a sprite, a few steps
-// per frame; forming and fading only mask that sprite with a small field of arrival
-// times, so a frame costs a couple of image draws.
+// Living ink. Every minute or so a new element of colour forms on its own: an ink
+// blot spreading out from the drops that start it, a patch of grungy texture like a
+// photo laid over in overlay mode, a splash and the drops it threw, or now and then a
+// dry-brush stroke. While it rests it keeps moving faintly (creeping outward, its
+// pigment shifting), then it dissolves while others form. Each element is painted
+// once, a few steps per frame; a frame only masks that painting with a small field
+// of arrival times (when the spreading ink reaches each cell).
 const Ink = (() => {
-  const { TAU, canvas, rng, hash, fbm2, smooth } = Kit;
+  const { TAU, canvas, rng, hash, fbm2, pnoise2, pfbm2, smooth } = Kit;
   const { deform, polyPath, circlePts, gauss } = Paint;
 
-  // Where blooms may form (design px): clear of the meter and inside the vignette.
+  // Where elements may form (design px): clear of the meter and inside the vignette.
   // Two sit in front of the clockwork; the rest are far behind it.
   const ZONES = [
     { x: 2000, y: 330, R: [380, 500], depth: -0.95 },  // upper right, behind the astrolabe
@@ -25,22 +27,44 @@ const Ink = (() => {
     rose: '236,158,176', amber: '232,176,104', blue: '112,146,228',
   };
   const HUES = Object.keys(INKS);
+  // Light inks (amber, rose, teal) are drawn a little weaker than dark ones (crimson),
+  // so no colour jumps out more than another.
+  const LEVEL = {};
+  for (const h of HUES) {
+    const [r, g, b] = INKS[h].split(',').map(v => v / 255);
+    LEVEL[h] = 0.55 / (0.2126 * r + 0.7152 * g + 0.0722 * b);
+  }
   // Neighbouring colours that bleed into each other while wet.
   const BLEED = {
     teal: ['blue', 'violet'], crimson: ['rose', 'violet'], violet: ['blue', 'crimson'],
     rose: ['amber', 'crimson'], amber: ['rose', 'crimson'], blue: ['teal', 'violet'],
   };
 
-  const MAX = 4;         // blooms alive at once (a worldline shift may add one)
-  const GAP = [35, 95];  // seconds between new blooms
-  const PREP = 0.4;      // seconds to paint a bloom before it starts to form
-  const DRY = 6;         // seconds for the wet sheen to go
-  const RES = 0.5;       // sprite resolution relative to the screen
-  const STEPS = 2;       // painting steps per frame
-  const FRONT = 0.05;    // softness of the spreading edge, in field time
-  const TINT = 0.3;      // how strongly a bloom stains the linework under it
+  // Kinds of element: how often each appears, its size against its zone, seconds to
+  // form, how far it keeps creeping while it rests (in field time) and how strongly
+  // it is drawn. Blots and grit take their outline from the spreading field and dry
+  // with a rim; splashes and strokes take theirs from their painting.
+  const KINDS = {
+    blot: { weight: 0.42, size: [0.45, 0.7], form: [8, 13], creep: [0.06, 0.12], alpha: [0.38, 0.5], field: true },
+    grit: { weight: 0.22, size: [0.45, 0.65], form: [6, 10], creep: [0.04, 0.08], alpha: [0.28, 0.38], field: true },
+    splash: { weight: 0.2, size: [0.5, 0.65], form: [1.2, 2], creep: [0, 0], alpha: [0.3, 0.4] },
+    stroke: { weight: 0.16, size: [0.9, 1], form: [4, 6], creep: [0, 0], alpha: [0.26, 0.34] },
+  };
 
-  // ---------- Textures shared by every bloom ----------
+  const MAX = 4;           // elements at once, not counting ones dissolving (a shift may add one)
+  const MIN = 3;           // fewer than this and a new one comes within seconds
+  const GAP = [30, 80];    // seconds between new elements
+  const REST = [100, 260]; // seconds an element rests before it dissolves
+  const PREP = 0.4;        // seconds to paint an element before it starts to form
+  const DRY = 6;           // seconds for the wet sheen to go
+  const RES = 0.5;         // sprite resolution relative to the screen
+  const STEPS = 2;         // painting steps per frame
+  const FRONT = 0.05;      // softness of the spreading edge, in field time
+  const EDGE = 0.07;       // softness of the edge once it has dried
+  const TINT = 0.3;        // how strongly an element stains the linework under it
+  const SHIMMER = 0.3;     // how much the pigment keeps shifting once formed
+
+  // ---------- Textures shared by every element ----------
 
   // Large soft blotches, knocked out of the paint between layers.
   const blotches = [];
@@ -68,15 +92,6 @@ const Ink = (() => {
     g.restore();
   }
 
-  // Value noise that wraps every P lattice cells, so the paper tile repeats seamlessly.
-  function pnoise(x, y, P, seed) {
-    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
-    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-    const h = (a, b) => hash(((a % P) + P) % P * 374761393 + ((b % P) + P) % P * 668265263, seed);
-    const a = h(ix, iy), b = h(ix + 1, iy), c = h(ix, iy + 1), d = h(ix + 1, iy + 1);
-    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
-  }
-
   // Paper tooth: speckle clustered by the grain of the paper.
   let toothTile = null;
   function tooth() {
@@ -84,7 +99,7 @@ const Ink = (() => {
     const n = 256, c = canvas(n, n), g = c.getContext('2d'), img = g.createImageData(n, n), r = rng(404);
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
-        const v = 0.5 * pnoise(x / 8, y / 8, 32, 7) + 0.5 * r();
+        const v = 0.5 * pnoise2(x / 8, y / 8, 32, 7) + 0.5 * r();
         img.data[(y * n + x) * 4 + 3] = smooth(0.5, 0.95, v) * 255;
       }
     }
@@ -92,16 +107,242 @@ const Ink = (() => {
     return (toothTile = c);
   }
 
-  // ---------- Painting ----------
+  // Shimmer: tileable noise, sampled drifting, that keeps formed pigment moving.
+  const SH = 64, SH_CELL = 24; // tile size in samples; design px per sample
+  let shimmerTile = null;
+  function shimmer(x, y) {
+    if (!shimmerTile) {
+      shimmerTile = new Float32Array(SH * SH);
+      for (let j = 0; j < SH; j++) {
+        for (let i = 0; i < SH; i++) shimmerTile[j * SH + i] = smooth(0.25, 0.75, pfbm2(i / 16, j / 16, 4, 12, 3));
+      }
+    }
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const x0 = ((ix % SH) + SH) % SH, y0 = ((iy % SH) + SH) % SH, x1 = (x0 + 1) % SH, y1 = (y0 + 1) % SH;
+    const a = shimmerTile[y0 * SH + x0], b = shimmerTile[y0 * SH + x1], c = shimmerTile[y1 * SH + x0], d = shimmerTile[y1 * SH + x1];
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  }
 
-  // A swept wash, as if laid with one loaded brush: blunt and full where the brush
-  // landed, bending as it travels and thinning as the brush runs dry. One side bled
-  // into wet paper, the other dried crisp. Also the drops that start it (where the
-  // brush landed, then further along), how much faster ink runs along it than across
-  // it, and its box.
+  // ---------- Painting helpers ----------
+
+  const blob = (cx, cy, rad, r) => deform(circlePts(8, rad, r, [0.6, 1.8]), 3, 0.3, r).map(([x, y, v]) => [x + cx, y + cy, v]);
+
+  // A canvas the size of the sprite, in the same design-unit frame.
+  function layer(geo, k) {
+    const { x0, y0, x1, y1 } = geo.box, c = canvas((x1 - x0) * k, (y1 - y0) * k), g = c.getContext('2d');
+    g.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
+    return [c, g];
+  }
+
+  // Wet-in-wet: a neighbouring colour creeps into part of the element around (cx, cy).
+  function bleed(g, b, geo, k, [cx, cy]) {
+    const r = geo.r, [c, cg] = layer(geo, k), rad = b.R * (0.35 + r() * 0.3);
+    const col = INKS[b.color2], rg = cg.createRadialGradient(cx, cy, 0, cx, cy, rad);
+    rg.addColorStop(0, `rgba(${col},0.9)`);
+    rg.addColorStop(0.55, `rgba(${col},0.4)`);
+    rg.addColorStop(1, `rgba(${col},0)`);
+    cg.fillStyle = rg;
+    cg.fillRect(geo.box.x0, geo.box.y0, geo.box.x1 - geo.box.x0, geo.box.y1 - geo.box.y0);
+    knock(cg, geo.box, r, 0.8);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.globalAlpha = 0.5 + r() * 0.3;
+    g.drawImage(c, 0, 0);
+    g.restore();
+  }
+
+  // Drying: pigment migrates to the rims. Lifting paint in proportion to a blurred copy
+  // of itself thins the evenly dense interior and leaves every edge denser.
+  function dry(g, b, k, strength) {
+    const c = g.canvas, soft = canvas(c.width, c.height), sg = soft.getContext('2d');
+    sg.filter = `blur(${Math.max(1, b.R * 0.045 * k)}px)`;
+    sg.drawImage(c, 0, 0);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'destination-out';
+    g.globalAlpha = strength;
+    g.drawImage(soft, 0, 0);
+    g.restore();
+  }
+
+  // Paper tooth: pigment settles unevenly into the grain of the paper.
+  function granulate(g, r, strength = 0.5) {
+    const c = g.canvas;
+    g.save();
+    g.setTransform(1, 0, 0, 1, -r() * 256, -r() * 256);
+    g.globalCompositeOperation = 'destination-out';
+    g.globalAlpha = strength;
+    g.fillStyle = g.createPattern(tooth(), 'repeat');
+    g.fillRect(0, 0, c.width + 256, c.height + 256);
+    g.restore();
+  }
+
+  // ---------- Blot and grit: outline from the spreading field ----------
+
+  // A box big enough for the blot to spread into whichever way it runs, the drops
+  // that start it, and how the ink runs: along an axis, in fingers, sometimes downhill.
+  function blotPlan(b, r) {
+    const asp = 1 + r() * 1.1, ang = r() * Math.PI, ca = Math.cos(ang), sa = Math.sin(ang);
+    const A = b.R * 1.8 * Math.sqrt(asp), B = b.R * 1.8 / Math.sqrt(asp);
+    const hx = Math.hypot(A * ca, B * sa), hy = Math.hypot(A * sa, B * ca);
+    const drops = [];
+    for (let d = 0; d < b.drops; d++) {
+      const a = r() * TAU, dist = d ? b.R * (0.3 + r() * 0.4) : b.R * 0.1 * r();
+      drops.push({ x: Math.cos(a) * dist, y: Math.sin(a) * dist, delay: d ? 0.15 + r() * 0.35 : 0 });
+    }
+    return {
+      r, drops, area: Math.PI * b.R * b.R,
+      box: { x0: -hx, y0: -hy, x1: hx, y1: hy },
+      run: { angle: ang, flow: asp, scale: b.R * (0.12 + r() * 0.22), finger: 2 + r() * 1.5, fall: r() < 0.35 ? 0.3 + r() * 0.5 : 0, outside: 1 },
+    };
+  }
+
+  // Fibres: ink run out along the paper, wandering away from each drop.
+  function fibres(g, b, geo, col) {
+    const r = geo.r;
+    g.save();
+    g.strokeStyle = `rgb(${col})`;
+    g.lineCap = 'round';
+    for (const d of geo.drops) {
+      for (let i = 0, n = 26 + Math.floor(r() * 30); i < n; i++) {
+        let a = r() * TAU, x = d.x, y = d.y;
+        const step = b.R * (0.4 + r() * 0.9) / 14;
+        g.globalAlpha = 0.05 + r() * 0.06;
+        g.lineWidth = 0.6 + r() * 1.6;
+        g.beginPath();
+        g.moveTo(x, y);
+        for (let s = 0; s < 14; s++) { a += gauss(r) * 0.18; x += Math.cos(a) * step; y += Math.sin(a) * step; g.lineTo(x, y); }
+        g.stroke();
+      }
+    }
+    g.restore();
+  }
+
+  // An ink blot: an even wash over the whole box, thinned in broad blotches, densest
+  // where the drops landed and run out along the paper. The field decides how much
+  // of it shows, so the outline is whatever shape the spreading ink takes.
+  function* paintBlot(g, b, geo, k) {
+    const { r, box } = geo, col = INKS[b.color], W = box.x1 - box.x0, H = box.y1 - box.y0;
+    g.fillStyle = `rgba(${col},0.75)`;
+    g.fillRect(box.x0, box.y0, W, H);
+    for (let i = 0; i < 4; i++) knock(g, box, r, 0.25 + r() * 0.2);
+    yield;
+    for (const d of geo.drops) {
+      const rg = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, b.R * (0.5 + r() * 0.4));
+      rg.addColorStop(0, `rgba(${col},0.5)`);
+      rg.addColorStop(1, `rgba(${col},0)`);
+      g.fillStyle = rg;
+      g.fillRect(box.x0, box.y0, W, H);
+    }
+    fibres(g, b, geo, col);
+    for (let i = 0, n = 2 + Math.floor(r() * 4); i < n; i++) {
+      const d = geo.drops[Math.floor(r() * geo.drops.length)], a = r() * TAU, dist = b.R * r() * 0.7;
+      const base = blob(d.x + Math.cos(a) * dist, d.y + Math.sin(a) * dist, b.R * (0.06 + r() * 0.12), r);
+      g.fillStyle = `rgba(${col},${(0.05 + r() * 0.04).toFixed(3)})`;
+      for (let L = 0; L < 7; L++) g.fill(polyPath(deform(base, 2, 0.25, r)));
+    }
+    knock(g, box, r, 0.2);
+    yield;
+    bleed(g, b, geo, k, [geo.drops[0].x + gauss(r) * b.R * 0.3, geo.drops[0].y + gauss(r) * b.R * 0.3]);
+    granulate(g, r);
+  }
+
+  // Grit: eroded, stained texture like an overlay photograph of old plaster or rusted
+  // metal, in the ink's colour: crisp-edged stains, a network of fine cracks and pits.
+  // Its structure is worked out at a little under the sprite's resolution and
+  // sharpened with grime and the paper's tooth.
+  function* paintGrit(g, b, geo) {
+    const { r, box } = geo, col = INKS[b.color], W = box.x1 - box.x0, H = box.y1 - box.y0;
+    const w = Math.ceil(280 * Math.min(1, W / H)), h = Math.ceil(280 * Math.min(1, H / W));
+    const c = canvas(w, h), cg = c.getContext('2d'), img = cg.createImageData(w, h), d = img.data;
+    const [cr, cgr, cb] = col.split(',').map(Number);
+    const s = Math.floor(r() * 1000), sc = 3 + r() * 3, lo = 0.4 + r() * 0.08, warp = 1.2 + r() * 0.8;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const u = x / w * sc * Math.max(1, W / H), v = y / h * sc * Math.max(1, H / W);
+        const wx = fbm2(u + 3.1, v, s, 3), wy = fbm2(u, v + 7.7, s + 5, 3);
+        const stain = smooth(lo, lo + 0.14, fbm2(u + wx * warp, v + wy * warp, s + 11, 4));
+        const ridge = 1 - Math.abs(2 * fbm2(u * 2.2 + wx, v * 2.2 + wy, s + 31, 3) - 1);
+        const crack = Math.pow(smooth(0.84, 0.97, ridge), 1.5);
+        let a = stain * (0.4 + 0.6 * fbm2(u * 7, v * 7, s + 23, 2)) + crack * 0.35 * (1 - stain * 0.5);
+        if (hash(x * 7919 + y * 104729, s) < 0.12 * smooth(0.5, 0.7, fbm2(u * 4, v * 4, s + 41, 2))) a *= 0.25; // pits, in clusters
+        const i = (y * w + x) * 4;
+        d[i] = cr; d[i + 1] = cgr; d[i + 2] = cb;
+        d[i + 3] = Math.min(1, a) * 255;
+      }
+      if (y % 30 === 29) yield;
+    }
+    cg.putImageData(img, 0, 0);
+    g.save();
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(c, box.x0, box.y0, W, H);
+    g.restore();
+    // Grime: specks of every size, mostly tiny.
+    g.fillStyle = `rgba(${col},0.7)`;
+    for (let i = 0; i < 260; i++) {
+      g.beginPath();
+      g.arc(box.x0 + r() * W, box.y0 + r() * H, 0.6 + Math.pow(r(), 3) * 3.5, 0, TAU);
+      g.fill();
+    }
+    granulate(g, r, 0.6);
+  }
+
+  // ---------- Splash: a blot and the drops it threw ----------
+
+  function splashPlan(b, r) {
+    const core = b.R * 0.45, dir = r() * TAU, spread = 0.7 + r() * 1.6;
+    const blot = deform(circlePts(12, core, r, [0.5, 1.4]), 3, 0.2, r);
+    const spray = [];
+    for (let i = 0, n = 24 + Math.floor(r() * 36); i < n; i++) {
+      const a = dir + gauss(r) * spread, f = Math.pow(r(), 1.5), dist = core * (1.1 + f * 2.3);
+      spray.push({ x: Math.cos(a) * dist, y: Math.sin(a) * dist, rad: Math.max(1.4, core * 0.17 * Math.pow(r(), 2) * (1.2 - f * 0.7)) });
+    }
+    let ext = core * 1.35;
+    for (const d of spray) ext = Math.max(ext, Math.hypot(d.x, d.y) + d.rad * 2);
+    const m = b.R * 0.06;
+    return {
+      r, blot, spray, drops: [{ x: 0, y: 0, delay: 0 }],
+      box: { x0: -ext - m, y0: -ext - m, x1: ext + m, y1: ext + m },
+      run: { angle: dir, flow: 1, scale: b.R * 0.3, finger: 0.5, fall: 0, outside: 1 },
+    };
+  }
+
+  function* paintSplash(g, b, geo, k) {
+    const { r, box } = geo, col = INKS[b.color];
+    // Where it landed: translucent layers of one outline.
+    for (let L = 0; L < 24; L++) {
+      g.fillStyle = `rgba(${col},0.07)`;
+      g.fill(polyPath(deform(geo.blot, 2, 0.12, r)));
+      if (L % 8 === 7) { knock(g, box, r, 0.22); yield; }
+    }
+    // The drops it threw: round, a little irregular.
+    for (const d of geo.spray) {
+      g.fillStyle = `rgba(${col},${(0.4 + r() * 0.45).toFixed(3)})`;
+      g.fill(polyPath(deform(circlePts(8, d.rad, r, [0.3, 0.9]), 2, 0.1, r).map(([x, y, v]) => [x + d.x, y + d.y, v])));
+    }
+    // Mist: the finest spray, mostly between the blot and the drops.
+    for (let i = 0; i < 180; i++) {
+      const s = geo.spray[Math.floor(r() * geo.spray.length)], f = 0.3 + r() * 0.9;
+      g.fillStyle = `rgba(${col},${(0.25 + r() * 0.4).toFixed(3)})`;
+      g.beginPath();
+      g.arc(s.x * f + gauss(r) * b.R * 0.08, s.y * f + gauss(r) * b.R * 0.08, 0.5 + r() * 1.3, 0, TAU);
+      g.fill();
+    }
+    yield;
+    bleed(g, b, geo, k, [gauss(r) * b.R * 0.15, gauss(r) * b.R * 0.15]);
+    dry(g, b, k, 0.7);
+    granulate(g, r);
+  }
+
+  // ---------- Stroke: a swept dry-brush wash ----------
+
+  // Blunt and full where the brush landed, bending as it travels and thinning as the
+  // brush runs dry. One side bled into wet paper, the other dried crisp. The drops
+  // that start it run along it, faster along than across.
   const SAMPLES = 20;
-  function layout(b) {
-    const r = rng(b.seed), ca = Math.cos(b.angle), sa = Math.sin(b.angle);
+  function strokePlan(b, r) {
+    const ca = Math.cos(b.angle), sa = Math.sin(b.angle);
     const rot = (u, v) => [u * ca - v * sa, u * sa + v * ca];
     const len = b.R * (1.6 + r() * 0.8), bend = (r() - 0.5) * b.R * 0.9, wide = b.R * (0.22 + r() * 0.1);
     const n1 = r() * 100, n2 = r() * 100, wet = r() < 0.5 ? 1 : -1;
@@ -127,15 +368,13 @@ const Ink = (() => {
       outline.push([...rot(p0.u + p0.nu * across - p0.nv * back, p0.v + p0.nv * across + p0.nu * back), 0.8 + r() * 0.6]);
     }
     const at = s => spine[Math.round(s * SAMPLES)];
-    const [fx, fy] = rot(at(0.2).u, at(0.2).v);
-    const lobes = [{ pts: deform(outline, 2, 0.1, r), cx: fx, cy: fy, w: 1 }];
+    const lobes = [{ pts: deform(outline, 2, 0.1, r), w: 1 }];
     for (let L = 0; L < b.bulges; L++) {
       const p = at(0.15 + r() * 0.5), side = r() < 0.5 ? -1 : 1, o = p.h * (0.45 + r() * 0.3) * side;
       const [cx, cy] = rot(p.u + p.nu * o, p.v + p.nv * o);
       const pts = circlePts(10, p.h * (0.5 + r() * 0.35), r, [0.5, 1.5]).map(([x, y, v]) => [x + cx, y + cy, v]);
-      lobes.push({ pts: deform(pts, 3, 0.18, r), cx, cy, w: 0.6 + r() * 0.4 });
+      lobes.push({ pts: deform(pts, 3, 0.18, r), w: 0.6 + r() * 0.4 });
     }
-    // The first drop lands where the brush did; any others further along the stroke.
     const drops = [];
     for (let d = 0; d < b.drops; d++) {
       const p = at(Math.min(0.85, 0.12 + d * (0.3 + r() * 0.1)));
@@ -146,25 +385,20 @@ const Ink = (() => {
     for (const l of lobes) {
       for (const [x, y] of l.pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
     }
-    const m = b.R * 0.14, flow = Math.min(3, Math.max(1.4, len / (2.2 * wide)));
-    return { r, rot, spine, lobes, drops, flow, box: { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m } };
+    const m = b.R * 0.14;
+    return {
+      r, rot, spine, lobes, drops,
+      box: { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m },
+      run: { angle: b.angle, flow: Math.min(3, Math.max(1.4, len / (2.2 * wide))), scale: b.R * 0.28, finger: 2, fall: 0, outside: 0.12 },
+    };
   }
 
-  // A random point inside the wash between s0 and s1 along it, up to between f0 and
+  // A random point inside the stroke between s0 and s1 along it, up to between f0 and
   // f1 of the way out to its edge.
   function inside(geo, f0, f1, s0 = 0.05, s1 = 0.9) {
     const r = geo.r, p = geo.spine[Math.round((s0 + r() * (s1 - s0)) * SAMPLES)];
     const f = (f0 + r() * (f1 - f0)) * (r() < 0.5 ? -1 : 1);
     return geo.rot(p.u + p.nu * p.h * f, p.v + p.nv * p.h * f);
-  }
-
-  const blob = (cx, cy, rad, r) => deform(circlePts(8, rad, r, [0.6, 1.8]), 3, 0.3, r).map(([x, y, v]) => [x + cx, y + cy, v]);
-
-  // A canvas the size of the sprite, in the same design-unit frame.
-  function layer(geo, k) {
-    const { x0, y0, x1, y1 } = geo.box, c = canvas((x1 - x0) * k, (y1 - y0) * k), g = c.getContext('2d');
-    g.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
-    return [c, g];
   }
 
   // A line that follows the stroke at fraction f of its half-width, from s0 to s1,
@@ -206,50 +440,6 @@ const Ink = (() => {
     g.restore();
   }
 
-  // Wet-in-wet: a neighbouring colour creeps into part of the stain.
-  function bleed(g, b, geo, k) {
-    const r = geo.r, [c, cg] = layer(geo, k), [cx, cy] = inside(geo, 0, 0.8), rad = b.R * (0.35 + r() * 0.3);
-    const col = INKS[b.color2], rg = cg.createRadialGradient(cx, cy, 0, cx, cy, rad);
-    rg.addColorStop(0, `rgba(${col},0.9)`);
-    rg.addColorStop(0.55, `rgba(${col},0.4)`);
-    rg.addColorStop(1, `rgba(${col},0)`);
-    cg.fillStyle = rg;
-    cg.fillRect(geo.box.x0, geo.box.y0, geo.box.x1 - geo.box.x0, geo.box.y1 - geo.box.y0);
-    knock(cg, geo.box, r, 0.8);
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.globalCompositeOperation = 'source-atop';
-    g.globalAlpha = 0.5 + r() * 0.3;
-    g.drawImage(c, 0, 0);
-    g.restore();
-  }
-
-  // Drying: pigment migrates to the rims. Lifting paint in proportion to a blurred copy
-  // of itself thins the evenly dense interior and leaves every edge denser.
-  function dry(g, b, k, strength) {
-    const c = g.canvas, soft = canvas(c.width, c.height), sg = soft.getContext('2d');
-    sg.filter = `blur(${Math.max(1, b.R * 0.045 * k)}px)`;
-    sg.drawImage(c, 0, 0);
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.globalCompositeOperation = 'destination-out';
-    g.globalAlpha = strength;
-    g.drawImage(soft, 0, 0);
-    g.restore();
-  }
-
-  // Paper tooth: pigment settles unevenly into the grain of the paper.
-  function granulate(g, r) {
-    const c = g.canvas;
-    g.save();
-    g.setTransform(1, 0, 0, 1, -r() * 256, -r() * 256);
-    g.globalCompositeOperation = 'destination-out';
-    g.globalAlpha = 0.5;
-    g.fillStyle = g.createPattern(tooth(), 'repeat');
-    g.fillRect(0, 0, c.width + 256, c.height + 256);
-    g.restore();
-  }
-
   // Thinning along the stroke: the brush carries less paint the further it travels.
   function thin(g, geo, strength) {
     const a = geo.spine[0], z = geo.spine[SAMPLES], [x0, y0] = geo.rot(a.u, a.v), [x1, y1] = geo.rot(z.u, z.v);
@@ -264,7 +454,7 @@ const Ink = (() => {
     g.restore();
   }
 
-  function* paint(g, b, geo, k) {
+  function* paintStroke(g, b, geo, k) {
     const { r, lobes, box } = geo, col = INKS[b.color];
     // Wet halo: the first wash spreads wider and soft, into damp paper.
     const [hc, hg] = layer(geo, k);
@@ -280,8 +470,8 @@ const Ink = (() => {
     g.drawImage(hc, 0, 0);
     g.restore();
     yield;
-    // Body: dozens of translucent deformations of the stroke. Texture knocked out
-    // between layers leaves the pigment pooled in places and thin in others.
+    // Body: dozens of translucent deformations of the stroke, knocked back between
+    // layers so the pigment pools in places and thins in others.
     for (let L = 0, n = 20 * lobes.length; L < n; L++) {
       const l = lobes[L % lobes.length];
       g.fillStyle = `rgba(${col},${(0.05 * l.w).toFixed(4)})`;
@@ -289,7 +479,6 @@ const Ink = (() => {
       if (L % 10 === 9) { knock(g, box, r, 0.3); yield; }
     }
     thin(g, geo, 0.55);
-    // Pools: pigment that settled, mostly near where the brush landed.
     for (let i = 0, n = 3 + Math.floor(r() * 3); i < n; i++) {
       const [cx, cy] = inside(geo, 0, 0.6, 0.05, 0.7), base = blob(cx, cy, b.R * (0.04 + r() * 0.09), r);
       g.fillStyle = `rgba(${col},${(0.03 + r() * 0.05).toFixed(3)})`;
@@ -298,18 +487,21 @@ const Ink = (() => {
     knock(g, box, r, 0.25);
     yield;
     bristles(g, b, geo);
-    bleed(g, b, geo, k);
+    bleed(g, b, geo, k, inside(geo, 0, 0.8));
     dry(g, b, k, 0.8);
     dryBrush(g, geo);
     yield;
     granulate(g, r);
-    // Double the stain's opacity: the passes set how strong it is when drawn.
+    // Double the stroke's opacity: the passes set how strong it is when drawn.
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalCompositeOperation = 'lighter';
     g.drawImage(g.canvas, 0, 0);
     g.restore();
   }
+
+  const PLANS = { blot: blotPlan, grit: blotPlan, splash: splashPlan, stroke: strokePlan };
+  const PAINTERS = { blot: paintBlot, grit: paintGrit, splash: paintSplash, stroke: paintStroke };
 
   // ---------- Arrival field: when the spreading ink reaches each cell ----------
 
@@ -345,24 +537,32 @@ const Ink = (() => {
     }
   }
 
-  // Ink runs fast along channels in the paper and along the stain's long axis, so the
-  // front fingers outward and fills in behind. Times are normalised: 0 where a drop
-  // lands, 1 at the last painted cell. D orders the dissolve: thin pigment lifts first.
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+  // Ink runs fast along channels in the paper, along the element's axis and, for some
+  // blots, downhill, so the front fingers outward and fills in behind. Times are
+  // normalised: a blot's outline (time 1) is where it has covered its area; a painted
+  // element is complete when its last painted cell is reached. D orders the dissolve:
+  // thin pigment lifts first.
   function makeField(b, geo, sprite) {
-    const { x0, y0, x1, y1 } = geo.box, w = x1 - x0, h = y1 - y0;
-    const cs = Math.max(8, w / 120, h / 120), gw = Math.ceil(w / cs), gh = Math.ceil(h / cs), N = gw * gh;
+    const { x0, y0, x1, y1 } = geo.box, w = x1 - x0, h = y1 - y0, run = geo.run;
+    const cs = Math.max(5, w / 150, h / 150), gw = Math.ceil(w / cs), gh = Math.ceil(h / cs), N = gw * gh;
     const dc = canvas(gw, gh), dg = dc.getContext('2d');
     dg.imageSmoothingQuality = 'high';
     dg.drawImage(sprite, 0, 0, w / cs, h / cs);
     const px = dg.getImageData(0, 0, gw, gh).data, dens = new Float32Array(N);
     let dmax = 1e-6;
     for (let k = 0; k < N; k++) { dens[k] = px[k * 4 + 3] / 255; dmax = Math.max(dmax, dens[k]); }
-    const ns = b.seed % 100000, speed = new Float32Array(N), D = new Float32Array(N);
+    const ns = b.seed % 100000, edge = Math.min(gw, gh), speed = new Float32Array(N), D = new Float32Array(N);
     for (let j = 0, k = 0; j < gh; j++) {
       for (let i = 0; i < gw; i++, k++) {
         const x = x0 + (i + 0.5) * cs, y = y0 + (j + 0.5) * cs;
-        const n = smooth(0.3, 0.72, fbm2(x / (b.R * 0.28), y / (b.R * 0.28), ns, 3));
-        speed[k] = dens[k] > 0.02 ? 0.25 + 1.6 * n * n : 0.12;
+        const n = smooth(0.3, 0.72, fbm2(x / run.scale, y / run.scale, ns, 3));
+        let s = (0.25 + 1.6 * Math.pow(n, run.finger)) * (0.75 + 0.5 * Kit.noise2(x / (cs * 2.5), y / (cs * 2.5), ns + 3));
+        // A blot slows near the edge of its box, so it never runs into a straight cut.
+        if (geo.area) s *= 0.06 + 0.94 * smooth(0, 0.16, Math.min(i, j, gw - 1 - i, gh - 1 - j) / edge);
+        else if (dens[k] <= 0.02) s = run.outside;
+        speed[k] = s;
         D[k] = 0.55 * dens[k] / dmax + 0.45 * smooth(0.3, 0.72, fbm2(x / (b.R * 0.2), y / (b.R * 0.2), ns + 7, 3));
       }
     }
@@ -373,10 +573,10 @@ const Ink = (() => {
       const t0 = d.delay * b.R;
       if (t0 < T[j * gw + i]) { T[j * gw + i] = t0; heap.push(t0, j * gw + i); }
     }
-    const ca = Math.cos(b.angle), sa = Math.sin(b.angle), steps = [];
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const ca = Math.cos(run.angle), sa = Math.sin(run.angle), steps = [];
+    for (const [di, dj] of DIRS) {
       const u = (di * ca + dj * sa) * cs, v = (-di * sa + dj * ca) * cs;
-      steps.push([di, dj, Math.hypot(u / geo.flow, v)]);
+      steps.push([di, dj, Math.hypot(u / run.flow, v) / (1 + run.fall * Math.max(0, dj) / Math.hypot(di, dj))]);
     }
     while (heap.size) {
       const [tk, k] = heap.pop();
@@ -389,10 +589,28 @@ const Ink = (() => {
         if (nt < T[kk]) { T[kk] = nt; heap.push(nt, kk); }
       }
     }
-    let tmax = 1e-6;
-    for (let k = 0; k < N; k++) if (dens[k] > 0.02) tmax = Math.max(tmax, T[k]);
+    let unit = 1e-6;
+    if (geo.area) {
+      unit = Float64Array.from(T).sort()[Math.min(N - 1, Math.round(geo.area / (cs * cs)))];
+    } else {
+      for (let k = 0; k < N; k++) if (dens[k] > 0.02) unit = Math.max(unit, T[k]);
+    }
+    // Normalise, then soften cell-to-cell noise so outlines come out smooth when the
+    // mask is scaled up.
     const Tn = new Float32Array(N);
-    for (let k = 0; k < N; k++) Tn[k] = Math.min(1.5, T[k] / tmax);
+    for (let j = 0, k = 0; j < gh; j++) {
+      for (let i = 0; i < gw; i++, k++) {
+        let sum = 0, cnt = 0;
+        for (let dj = -1; dj <= 1; dj++) {
+          for (let di = -1; di <= 1; di++) {
+            const ii = i + di, jj = j + dj;
+            if (ii < 0 || jj < 0 || ii >= gw || jj >= gh) continue;
+            sum += Math.min(2, T[jj * gw + ii] / unit); cnt++;
+          }
+        }
+        Tn[k] = sum / cnt;
+      }
+    }
     const mask = canvas(gw, gh), boost = canvas(gw, gh);
     return {
       gw, gh, cs, T: Tn, D, mask, boost,
@@ -400,29 +618,56 @@ const Ink = (() => {
     };
   }
 
-  // Forming: `mask` reveals the paint behind the front; `boost` adds the wet, dense
-  // pigment at the front and in the fresh drop, both fading as the ink slows.
-  function formMasks(f, p) {
-    const tau = (1 + FRONT) * (1 - Math.pow(1 - p, 1.5));
-    const band = 0.9 * Math.pow(1 - p, 0.8), core = 1.2 * (1 - smooth(0, 0.7, p)), coreR = 0.04 + 0.4 * tau;
-    const m = f.mImg.data, o = f.bImg.data, T = f.T;
-    for (let k = 0, i = 3; k < T.length; k++, i += 4) {
-      const d = tau - T[k], rev = smooth(-FRONT, FRONT, d);
-      m[i] = rev * 255;
-      o[i] = Math.min(1, rev * (band * Math.exp(-d * d / 0.004) + core * Math.exp(-T[k] / coreR))) * 255;
+  // What the masks need at time t (null when nothing shows). `tau` is how far the
+  // front has got; `band` the wet pigment at a moving front, `rim` the dried tideline,
+  // `core` the fresh drop; `level` the dissolve; (sx, sy) where the shimmer has drifted.
+  const creep = (b, t) => b.creep * (1 - Math.exp(-Math.max(0, t - b.born - b.form) / 90));
+  function state(b, t) {
+    const [ph, p] = b.phase(t);
+    if (ph === 'prep' || ph === 'gone') return null;
+    const st = {
+      tau: 1 + FRONT + creep(b, t), soft: EDGE, band: 0, rim: KINDS[b.kind].field ? 0.9 : 0, core: 0, coreR: 0.1,
+      level: null, sx: t * b.drift[0], sy: t * b.drift[1], fadeIn: 1, glow: 1,
+    };
+    if (ph === 'forming') {
+      st.tau = (1 + FRONT) * (1 - Math.pow(1 - p, 1.6));
+      st.soft = EDGE + (FRONT - EDGE) * (1 - smooth(0.6, 1, p));
+      st.band = 0.9 * Math.pow(1 - p, 0.7);
+      st.rim *= smooth(0.3, 1, p);
+      st.core = 1.1 * (1 - smooth(0, 0.7, p));
+      st.coreR = 0.04 + 0.4 * st.tau;
+      st.fadeIn = smooth(0, 0.04, p);
+      st.glow = 1.2 * st.fadeIn;
+    } else if (ph === 'drying') {
+      st.glow = 1 + 0.2 * (1 - smooth(0, 1, p));        // wet paint dries lighter
+    } else if (ph === 'fading') {
+      st.level = -0.12 + 1.24 * p;
+      st.rim *= 1 - p;
+      st.glow = 1 - 0.3 * p;
+    }
+    return st;
+  }
+
+  // This frame's masks: what shows (front, dissolve, shimmer) and the extra pigment
+  // at fronts, rims and fresh drops.
+  function masks(f, st) {
+    const m = f.mImg.data, o = f.bImg.data, T = f.T, D = f.D, step = f.cs / SH_CELL, W = 0.12;
+    for (let j = 0, k = 0, i4 = 3; j < f.gh; j++) {
+      for (let i = 0; i < f.gw; i++, k++, i4 += 4) {
+        const d = st.tau - T[k];
+        let a = smooth(-st.soft, st.soft, d);
+        if (a > 0 && st.level != null) a *= smooth(st.level - W, st.level + W, D[k]);
+        if (a > 0) a *= 1 - SHIMMER * shimmer(i * step + st.sx, j * step + st.sy);
+        m[i4] = a * 255;
+        const extra = st.band * Math.exp(-d * d / 0.004) + st.rim * Math.exp(-((d - 0.06) ** 2) / 0.0018) + st.core * Math.exp(-T[k] / st.coreR);
+        o[i4] = Math.min(1, a * extra) * 255;
+      }
     }
     f.mask.getContext('2d').putImageData(f.mImg, 0, 0);
     f.boost.getContext('2d').putImageData(f.bImg, 0, 0);
   }
 
-  // Fading: a rising level dissolves the stain in blotches, thinnest pigment first.
-  function fadeMask(f, p) {
-    const W = 0.12, lvl = -W + (1 + 2 * W) * p, m = f.mImg.data, D = f.D;
-    for (let k = 0, i = 3; k < D.length; k++, i += 4) m[i] = smooth(lvl - W, lvl + W, D[k]) * 255;
-    f.mask.getContext('2d').putImageData(f.mImg, 0, 0);
-  }
-
-  // The sprite seen through a field mask, into a canvas kept while the bloom animates.
+  // The sprite seen through a field mask, into a canvas kept while the element lives.
   function through(b, mask, out) {
     const { c, k } = b.sp, f = b.field;
     if (!out) out = canvas(c.width, c.height);
@@ -436,14 +681,14 @@ const Ink = (() => {
 
   // Paints the sprite (and the field, once) a step at a time.
   function* paintJob(b, S) {
-    const geo = layout(b), k = S * RES, [c, g] = layer(geo, k);
-    yield* paint(g, b, geo, k);
+    const geo = PLANS[b.kind](b, rng(b.seed)), k = S * RES, [c, g] = layer(geo, k);
+    yield* PAINTERS[b.kind](g, b, geo, k);
     if (!b.field) { b.field = makeField(b, geo, c); yield; }
     const { x0, y0, x1, y1 } = geo.box;
     b.sp = { c, k, x0, y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  // ---------- Blooms and their schedule ----------
+  // ---------- Elements and their schedule ----------
 
   const PHASES = [['forming', 'form'], ['drying', 'dry'], ['resting', 'rest'], ['fading', 'fade']];
 
@@ -469,39 +714,52 @@ const Ink = (() => {
 
   class Field {
     // `random` drives every choice (seed it for repeatable stills); `target` is the
-    // scene's parallax target, so a new bloom starts where the camera already is.
+    // scene's parallax target, so a new element starts where the camera already is.
     constructor(random, target, o = {}) {
       this.random = random;
       this.target = target;
-      this.restRange = o.rest || [140, 380];
+      this.restRange = o.rest || REST;
       this.blooms = [];
       this.next = null;
+      this.lastKind = null;
       this.S = 0;
     }
 
-    // A new bloom in a free zone, in a colour no living bloom is using.
-    spawn(t) {
+    // A kind by weight, never the same twice running.
+    pickKind() {
+      const kinds = Object.keys(KINDS).filter(k => k !== this.lastKind);
+      let u = this.random() * kinds.reduce((s, k) => s + KINDS[k].weight, 0);
+      for (const k of kinds) if ((u -= KINDS[k].weight) <= 0) return k;
+      return kinds[kinds.length - 1];
+    }
+
+    // A new element in a free zone, in a colour no living element is using.
+    spawn(t, kind = this.pickKind()) {
       const r = this.random;
       const zones = ZONES.map((_, i) => i).filter(i => !this.blooms.some(b => b.zone === i));
-      if (!zones.length) return null;
-      const zone = zones[Math.floor(r() * zones.length)], z = ZONES[zone];
       const hues = HUES.filter(h => !this.blooms.some(b => b.color === h));
+      if (!zones.length || !hues.length) return null;
+      const zone = zones[Math.floor(r() * zones.length)], z = ZONES[zone], K = KINDS[kind];
       const color = hues[Math.floor(r() * hues.length)], friends = BLEED[color];
-      const [rest0, rest1] = this.restRange;
+      const span = ([a, c]) => a + r() * (c - a);
       const b = new Bloom({
-        zone, depth: z.depth, color, color2: friends[Math.floor(r() * friends.length)],
+        zone, kind, depth: z.depth, color, color2: friends[Math.floor(r() * friends.length)],
         x: z.x + (r() - 0.5) * 160, y: z.y + (r() - 0.5) * 120,
-        R: z.R[0] + r() * (z.R[1] - z.R[0]), angle: (r() < 0.5 ? -1 : 1) * (0.2 + r() * 0.8),
-        bulges: Math.floor(r() * 3), drops: 1 + Math.floor(r() * 3), alpha: 0.25 + r() * 0.08,
+        R: span(z.R) * span(K.size), angle: (r() < 0.5 ? -1 : 1) * (0.2 + r() * 0.8),
+        bulges: Math.floor(r() * 3), drops: 1 + Math.floor(r() * 3),
+        alpha: 0, creep: span(K.creep), drift: [(r() - 0.5) * 0.5, (r() - 0.5) * 0.5],
         seed: Math.floor(r() * 1e9),
-        born: t + PREP, form: 9 + r() * 4, dry: DRY, rest: rest0 + r() * (rest1 - rest0), fade: 22 + r() * 12,
+        born: t + PREP, form: span(K.form), dry: DRY, rest: span(this.restRange), fade: 18 + r() * 12,
         cam: { x: this.target.x, y: this.target.y },
       });
+      // Big elements are thinner, so none of them takes over the frame.
+      b.alpha = span(K.alpha) * LEVEL[color] * Math.min(1, Math.pow(200 / b.R, 0.35));
+      this.lastKind = kind;
       this.blooms.push(b);
       return b;
     }
 
-    // Start with three dry blooms part-way through their rest; a fourth forms soon.
+    // Start with three dry elements part-way through their rest; a fourth forms soon.
     boot(t) {
       const r = this.random;
       for (let i = 0; i < 3; i++) {
@@ -512,26 +770,32 @@ const Ink = (() => {
       this.next = t + 3 + r() * 3;
     }
 
-    // A worldline shift: the oldest resting bloom dissolves and a fresh one forms.
+    // A worldline shift throws a splash, and the oldest resting element dissolves.
     shift(t) {
       if (this.next == null) return;
       const resting = this.blooms.filter(b => b.phase(t)[0] === 'resting').sort((a, b) => a.born - b.born);
-      if (resting.length && this.blooms.length >= MAX) resting[0].fadeFrom(t);
-      this.spawn(t);
+      if (resting.length && this.active(t) >= MAX) resting[0].fadeFrom(t);
+      this.spawn(t, 'splash');
       this.next = Math.max(this.next, t + GAP[0]);
     }
+
+    // Elements not yet dissolving: new ones are planned around these, so a fresh one
+    // can start forming while an old one fades.
+    active(t) { return this.blooms.filter(b => b.phase(t)[0] !== 'fading').length; }
 
     update(t) {
       if (this.next == null) this.boot(t);
       this.blooms = this.blooms.filter(b => t < b.end);
+      const active = this.active(t);
+      if (active < MIN && this.next > t + 12) this.next = t + 4 + this.random() * 8;
       if (t >= this.next) {
-        if (this.blooms.length < MAX) this.spawn(t);
+        if (active < MAX) this.spawn(t);
         this.next = t + GAP[0] + this.random() * (GAP[1] - GAP[0]);
       }
       this.work();
     }
 
-    // Paint waiting blooms, a bounded number of steps per frame.
+    // Paint waiting elements, a bounded number of steps per frame.
     work() {
       if (!this.S) return;
       let steps = STEPS;
@@ -555,47 +819,35 @@ const Ink = (() => {
       for (const b of this.blooms) { b.sp = b.live = null; b.job = null; this.finish(b); }
     }
 
-    // This frame's image of each forming or dissolving bloom, masked once for both passes.
+    // Mask this frame's image of every element once, for both passes.
     frame(t) {
       for (const b of this.blooms) {
-        if (!b.sp) continue;
-        const [ph, p] = (b.now = b.phase(t));
+        b.now = b.sp ? state(b, t) : null;
+        if (!b.now) continue;
+        masks(b.field, b.now);
         const live = b.live || {};
-        if (ph === 'forming') {
-          formMasks(b.field, p);
-          b.live = { reveal: through(b, b.field.mask, live.reveal), boost: through(b, b.field.boost, live.boost) };
-        } else if (ph === 'fading') {
-          fadeMask(b.field, p);
-          b.live = { reveal: through(b, b.field.mask, live.reveal) };
-        } else b.live = null;
+        b.live = { reveal: through(b, b.field.mask, live.reveal), boost: through(b, b.field.boost, live.boost) };
       }
     }
 
     // Two passes. 'glow' lays the ink's own colour over the dark ('screen'); 'tint'
     // stains whatever was drawn before it in the ink's hue ('color'), the way washes
-    // colour the linework of a painted key visual. `pick(bloom)` selects the blooms.
+    // colour the linework of a painted key visual. `pick(element)` selects which.
     draw(ctx, view, t, pass, pick) {
       const P = 42, S = view.S;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = pass === 'tint' ? 'color' : 'screen';
       for (const b of this.blooms) {
-        if (!b.sp || !b.now || !pick(b)) continue;
-        const [ph, p] = b.now;
-        if (ph === 'prep' || ph === 'gone') continue;
+        if (!b.now || !pick(b)) continue;
         const a1 = hash(b.seed, 1) * TAU, a2 = hash(b.seed, 2) * TAU;
         const dx = Math.sin(t / 89 + a1) * 8 - b.cam.x * P * b.depth;
         const dy = Math.cos(t / 107 + a2) * 5.6 - b.cam.y * P * b.depth * 0.7;
         const box = [view.ox + (b.x + b.sp.x0 + dx) * S, view.oy + (b.y + b.sp.y0 + dy) * S, b.sp.w * S, b.sp.h * S];
-        // Wet paint is a little more intense and dries lighter; dissolving thins it.
-        const fadeIn = smooth(0, 0.04, p);
-        const level = ph === 'forming' ? 1.2 * fadeIn
-          : ph === 'drying' ? 1 + 0.2 * (1 - smooth(0, 1, p))
-          : ph === 'fading' ? 1 - 0.3 * p : 1;
-        const A = (pass === 'tint' ? TINT : b.alpha) * level * (1 + 0.06 * Math.sin(t / 41 + a1));
-        ctx.globalAlpha = Math.min(1, A);
-        ctx.drawImage(b.live ? b.live.reveal : b.sp.c, ...box);
-        if (pass === 'glow' && ph === 'forming') {
-          ctx.globalAlpha = Math.min(1, b.alpha * fadeIn);
+        const breathe = 1 + 0.06 * Math.sin(t / 41 + a1);
+        ctx.globalAlpha = Math.min(1, (pass === 'tint' ? TINT : b.alpha) * b.now.glow * breathe);
+        ctx.drawImage(b.live.reveal, ...box);
+        if (pass === 'glow') {
+          ctx.globalAlpha = Math.min(1, b.alpha * 1.3 * b.now.fadeIn * breathe);
           ctx.drawImage(b.live.boost, ...box);
         }
       }
@@ -604,5 +856,5 @@ const Ink = (() => {
     }
   }
 
-  return { Field, ZONES, MAX };
+  return { Field, ZONES, KINDS, MAX };
 })();

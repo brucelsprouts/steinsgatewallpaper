@@ -163,5 +163,74 @@ test('shift off: clicks do nothing at all', () => {
   assert.strictEqual(spins, 0);
 });
 
+// ---------- Living ink: the schedule only (nothing is painted without a screen) ----------
+
+function loadInk() {
+  const ctx = { Math };
+  vm.createContext(ctx);
+  const src = ['kit.js', 'paint.js', 'ink.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
+  vm.runInContext(src + ';this.Kit = Kit; this.Ink = Ink;', ctx);
+  return ctx;
+}
+
+// Run a field for `secs` at 1 s steps, checking `each(field, t)` along the way.
+function simulate(field, secs, each, from = 0) {
+  for (let t = from; t <= secs; t += 1) { field.update(t); each(field, t); }
+}
+
+test('ink: boots with three resting elements and forms a fourth within seconds', () => {
+  const { Kit, Ink } = loadInk();
+  const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
+  f.update(0);
+  assert.strictEqual(f.blooms.length, 3);
+  assert.ok(f.blooms.every(b => b.phase(0)[0] === 'resting'));
+  for (let t = 0; t <= 7; t += 0.5) f.update(t);
+  assert.strictEqual(f.blooms.length, 4);
+});
+
+test('ink: over three hours, never crowded or bare, zones and colours never shared', () => {
+  const { Kit, Ink } = loadInk();
+  for (const seed of [1, 2, 3]) {
+    const f = new Ink.Field(Kit.rng(seed), { x: 0, y: 0 });
+    let spawned = 0, last = null;
+    simulate(f, 3 * 3600, (field, t) => {
+      const n = field.blooms.length, active = field.active(t);
+      assert.ok(active <= Ink.MAX, `${active} elements at ${t}s`);
+      if (t > 10) assert.ok(n >= 2 && active >= 1, `only ${n} elements (${active} not dissolving) at ${t}s`);
+      assert.strictEqual(new Set(field.blooms.map(b => b.zone)).size, n);
+      assert.strictEqual(new Set(field.blooms.map(b => b.color)).size, n);
+      const newest = field.blooms[field.blooms.length - 1];
+      if (newest !== last) { spawned++; last = newest; }
+    });
+    assert.ok(spawned > 60, `only ${spawned} elements in three hours`);
+  }
+});
+
+test('ink: kinds vary and never repeat back to back', () => {
+  const { Kit, Ink } = loadInk();
+  const f = new Ink.Field(Kit.rng(7), { x: 0, y: 0 }), kinds = [];
+  let last = null;
+  simulate(f, 3600, field => {
+    const newest = field.blooms[field.blooms.length - 1];
+    if (newest !== last) { kinds.push(newest.kind); last = newest; }
+  });
+  for (let i = 1; i < kinds.length; i++) assert.notStrictEqual(kinds[i], kinds[i - 1]);
+  assert.deepStrictEqual([...new Set(kinds)].sort(), Object.keys(Ink.KINDS).sort());
+});
+
+test('ink: a worldline shift throws a splash and dissolves the oldest', () => {
+  const { Kit, Ink } = loadInk();
+  const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
+  simulate(f, 20, () => {});
+  assert.strictEqual(f.active(20), Ink.MAX);
+  const oldest = [...f.blooms].sort((a, b) => a.born - b.born)[0];
+  f.shift(20);
+  const splash = f.blooms[f.blooms.length - 1];
+  assert.strictEqual(splash.kind, 'splash');
+  assert.strictEqual(oldest.phase(20.5)[0], 'fading');
+  simulate(f, 120, () => {}, 21);
+  assert.ok(!f.blooms.includes(oldest));
+});
+
 process.exitCode = failures ? 1 : 0;
 console.log(failures ? `${failures} failing` : 'all passing');

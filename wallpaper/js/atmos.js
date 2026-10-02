@@ -1,8 +1,9 @@
 'use strict';
-// Atmosphere over the whole frame: drifting dust lit by the tubes, a grungy textured
-// border under the vignette, and film grain over everything.
+// Atmosphere over the whole frame: drifting dust lit by the tubes, very light smoke,
+// hot spots and film light leaks, a grungy textured border under the vignette, dust
+// on the lens and film grain over everything.
 const Atmos = (() => {
-  const { TAU, canvas, rng, fbm2, smooth } = Kit;
+  const { TAU, canvas, rng, fbm2, pfbm2, smooth } = Kit;
 
   // ---------- Dust ----------
   class Dust {
@@ -58,10 +59,162 @@ const Atmos = (() => {
     }
   }
 
+  // ---------- Smoke: very light haze drifting through the scene ----------
+  // Two tileable wisps at an eighth of the resolution, scrolled different ways so the
+  // smoke seems to curl. Lit warm near the tubes, grey elsewhere, thinning upward.
+  function wisp(n, seed) {
+    const c = canvas(n, n), g = c.getContext('2d'), img = g.createImageData(n, n), P = 4;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const u = x / n * P, v = y / n * P;
+        const wx = pfbm2(u, v, P, seed, 3), wy = pfbm2(u + 1.7, v + 9.2, P, seed + 5, 3);
+        const i = (y * n + x) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+        img.data[i + 3] = smooth(0.45, 0.8, pfbm2(u + wx * 2, v + wy * 2, P, seed + 9, 4)) * 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
+  class Smoke {
+    constructor(seed = 17) { this.seed = seed; this.cam = { x: 0, y: 0 }; }
+
+    // `light` is the meter centre in design px.
+    build(view, light) {
+      const k = 1 / 8, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k);
+      this.k = k;
+      this.layer = canvas(w, h);
+      if (!this.tiles) this.tiles = [wisp(160, this.seed), wisp(160, this.seed + 1)];
+      const tint = canvas(w, h), g = tint.getContext('2d');
+      g.fillStyle = 'rgb(150,146,140)';
+      g.fillRect(0, 0, w, h);
+      const mx = (view.ox + light.x * view.S) * k, my = (view.oy + light.y * view.S) * k;
+      const rg = g.createRadialGradient(mx, my, 0, mx, my, 760 * view.S * k);
+      rg.addColorStop(0, 'rgba(255,170,100,0.9)');
+      rg.addColorStop(1, 'rgba(255,170,100,0)');
+      g.fillStyle = rg;
+      g.fillRect(0, 0, w, h);
+      const vg = g.createLinearGradient(0, 0, 0, h);
+      vg.addColorStop(0, 'rgba(0,0,0,0.3)');
+      vg.addColorStop(1, 'rgba(0,0,0,1)');
+      g.globalCompositeOperation = 'destination-in';
+      g.fillStyle = vg;
+      g.fillRect(0, 0, w, h);
+      this.tint = tint;
+    }
+
+    draw(ctx, view, t) {
+      const g = this.layer.getContext('2d'), w = this.layer.width, h = this.layer.height;
+      const par = 42 * 0.6 * view.S * this.k;
+      const layers = [[0.6, -0.25, 1.6, 1], [-0.4, -0.35, 2.3, 0.7]];
+      layers.forEach(([vx, vy, sc, a], i) => {
+        const pat = g.createPattern(this.tiles[i], 'repeat');
+        pat.setTransform(new DOMMatrix().translate(t * vx - this.cam.x * par * (1 + i * 0.4), t * vy - this.cam.y * par * 0.7).scale(sc));
+        g.globalCompositeOperation = i ? 'lighter' : 'copy';
+        g.globalAlpha = a;
+        g.fillStyle = pat;
+        g.fillRect(0, 0, w, h);
+      });
+      g.globalCompositeOperation = 'source-in';
+      g.globalAlpha = 1;
+      g.drawImage(this.tint, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.07;
+      ctx.drawImage(this.layer, 0, 0, view.W, view.H);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- Light: soft hot spots on the clockwork, and film light leaks ----------
+  // Both at an eighth of the resolution: they are nothing but soft gradients.
+  function glowSpot(g, x, y, rx, ry, rgb, a) {
+    g.save();
+    g.translate(x, y);
+    g.scale(1, ry / rx);
+    const rg = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+    rg.addColorStop(0, `rgba(${rgb},${a})`);
+    rg.addColorStop(0.45, `rgba(${rgb},${a * 0.45})`);
+    rg.addColorStop(1, `rgba(${rgb},0)`);
+    g.fillStyle = rg;
+    g.fillRect(-rx, -rx, rx * 2, rx * 2);
+    g.restore();
+  }
+
+  class Light {
+    constructor() { this.flareAt = -1e9; this.cam = { x: 0, y: 0 }; }
+
+    build(view) {
+      const k = 1 / 8, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k), S = view.S * k;
+      const X = x => (view.ox + x * view.S) * k, Y = y => (view.oy + y * view.S) * k;
+      const make = fn => { const c = canvas(w, h), g = c.getContext('2d'); g.globalCompositeOperation = 'lighter'; fn(g); return c; };
+      // Hot spots: light pooling on the clockwork.
+      this.hot = make(g => {
+        glowSpot(g, X(2050), Y(430), 560 * S, 470 * S, '255,196,140', 0.55);
+        glowSpot(g, X(1720), Y(1130), 420 * S, 300 * S, '150,205,215', 0.32);
+        glowSpot(g, X(2380), Y(930), 300 * S, 260 * S, '255,176,120', 0.3);
+      });
+      // Leaks: warm light bleeding in past the edge of the film, one on each side.
+      this.leaks = [
+        make(g => {
+          glowSpot(g, X(2600), Y(260), 620 * S, 900 * S, '255,128,60', 0.75);
+          glowSpot(g, X(2560), Y(120), 300 * S, 520 * S, '255,214,150', 0.6);
+        }),
+        make(g => {
+          glowSpot(g, X(-60), Y(1380), 700 * S, 520 * S, '228,70,96', 0.6);
+          glowSpot(g, X(160), Y(1440), 360 * S, 260 * S, '255,150,110', 0.45);
+        }),
+      ];
+    }
+
+    // A worldline shift washes the frame with a burst of leaked light.
+    flare(t) { this.flareAt = t; }
+
+    // 'hot' goes in with the scene; 'leak' goes over everything, past the vignette.
+    draw(ctx, view, t, pass) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'screen';
+      if (pass === 'hot') {
+        const dx = -this.cam.x * 42 * 0.6 * view.S, dy = -this.cam.y * 42 * 0.4 * view.S;
+        ctx.globalAlpha = 0.12 * (0.85 + 0.15 * Math.sin(t / 19));
+        ctx.drawImage(this.hot, dx, dy, view.W, view.H);
+      } else {
+        const burst = 1 + 2.2 * Math.exp(-Math.max(0, t - this.flareAt) / 1.3) * (t >= this.flareAt ? 1 : 0);
+        this.leaks.forEach((c, i) => {
+          const breathe = 0.5 + 0.5 * Math.sin(t / (47 + i * 14) + i * 2.1);
+          ctx.globalAlpha = Math.min(1, 0.12 * (0.25 + 0.75 * breathe) * burst);
+          ctx.drawImage(c, Math.sin(t / (71 + i * 9)) * 30 * view.S, 0, view.W, view.H);
+        });
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- Lens dust: fine specks sitting on the glass ----------
+  // Sparse, mostly toward the edges; drawn with `screen` over everything.
+  function lensDust(view, seed = 23) {
+    const k = 0.5, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k), S = view.S * k;
+    const c = canvas(w, h), g = c.getContext('2d'), r = rng(seed);
+    const edge = (x, y) => smooth(0.4, 1.05, Math.cbrt(Math.abs(x / w * 2 - 1) ** 3 + Math.abs(y / h * 2 - 1) ** 3));
+    g.fillStyle = '#efe4d6';
+    for (let i = 0; i < 900; i++) {
+      const x = r() * w, y = r() * h;
+      if (r() > 0.06 + 0.94 * edge(x, y)) continue;
+      g.globalAlpha = 0.1 + r() * 0.35;
+      g.beginPath();
+      g.arc(x, y, (0.3 + Math.pow(r(), 4) * 1.2) * Math.max(0.7, S * 2), 0, TAU);
+      g.fill();
+    }
+    return c;
+  }
+
   // ---------- Grain: fine speckle, strongest at the edges and around the glow ----------
   // Half resolution, so each grain covers about two pixels. Drawn with `difference`:
   // on the dark border it lifts into speckle, on the bright glow it breaks it up a little.
-  const AMP = 40;
+  const AMP = 32;
   function grain(view, hot, seed = 61) {
     const k = 0.5, w = Math.max(1, Math.ceil(view.W * k)), h = Math.max(1, Math.ceil(view.H * k));
     const c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
@@ -76,7 +229,7 @@ const Atmos = (() => {
         const edge = smooth(0.55, 1.05, Math.cbrt(ex[x] + ey[y]));
         s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
         const n = (s >>> 0) / 4294967296;
-        const v = n * n * (0.06 + 0.5 * edge + 0.45 * gx[x] * gy[y]) * AMP;
+        const v = n * n * (0.02 + 0.28 * edge + 0.3 * gx[x] * gy[y]) * AMP;
         d[i] = v; d[i + 1] = v * 0.95; d[i + 2] = v * 0.88; d[i + 3] = 255;
       }
     }
@@ -106,5 +259,5 @@ const Atmos = (() => {
     return c;
   }
 
-  return { Dust, grain, grunge };
+  return { Dust, Smoke, Light, lensDust, grain, grunge };
 })();

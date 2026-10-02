@@ -1,9 +1,10 @@
 # Divergence Meter
 
 An animated desktop wallpaper: a row of nixie tubes on a walnut base, surrounded by
-slowly turning clocks, gears and an escapement, with paint splatter, watercolour and
-film texture over the top. It shows the time, the date or a worldline, and every so
-often the worldline shifts: the tubes scramble, the clocks spin, and everything settles.
+slowly turning clocks, gears and an escapement, with living ink, light leaks, faint
+smoke and film grain over the top. It shows the time, the date or a worldline, and
+every so often the worldline shifts: the tubes scramble, the clocks spin, and
+everything settles.
 
 Everything is drawn in code (HTML canvas, no build step). No art from the show is used.
 
@@ -60,12 +61,19 @@ in Lively's settings.
 - **Moving the mouse** gives parallax: the deep clockwork drifts with the cursor while the
   nearer layers and the meter move against it.
 - With **Worldline shifts** off, nothing shifts and clicks do nothing.
+- **Ink** forms on its own every minute or so: an ink blot spreading from the drops
+  that start it, a patch of grungy texture, a splash with its drops, or a dry-brush
+  stroke. Each keeps drifting faintly while it rests, then dissolves after a few
+  minutes while others form. A worldline shift throws a fresh splash and a burst of
+  leaked light.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
 
-- Every static part (tube glass, mesh, glow, gears, dials, paint) is rendered once into an
-  image when the wallpaper starts. Each frame only moves and blends those images.
+- Every static part (tube glass, mesh, glow, gears, dials, textures) is rendered once into
+  an image when the wallpaper starts. Each frame only moves and blends those images.
+- Each new element of ink is painted once, a few small steps per frame, then only masked
+  each frame; the whole frame takes a few milliseconds at 2560×1440.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
 - Rendering stops entirely while the wallpaper is paused or hidden.
 - It renders at each monitor's own resolution. The design is 2560×1440 and scales to fit,
@@ -80,7 +88,8 @@ node tools/serve.js
 ```
 
 Then open <http://localhost:5173/wallpaper/>. In the browser console, `SG.shift()` triggers
-a shift and `SG.click()` simulates a click.
+a shift, `SG.click()` simulates a click, `SG.ink()` throws fresh ink and `SG.state()`
+shows what the tubes and ink are doing.
 
 URL parameters:
 
@@ -91,10 +100,13 @@ URL parameters:
   - `shiftAt=5` fires a shift at 5 s
   - `cursor=0.8,-0.4` pins the parallax
   - `worldline=1.048596` sets the starting worldline
+  - `seed=3` picks the ink (stills and recordings use 1)
+  - `inkRest=20` shortens how long each element of ink rests before it dissolves
 
 Tools (the screenshot and recording tools need `tools/serve.js` running):
 
-- `node tools/test.js`: behaviour checks for the display and shift logic
+- `node tools/test.js`: behaviour checks for the display, shift and ink scheduling logic
+- `tools/ink.html`: elements of ink in isolation, at rest, forming or dissolving, for tuning
 - `tools/shoot.sh <page> <out.png> [query]`: headless Chrome screenshot
 - `tools/record.html`: steps the wallpaper frame by frame and saves the frames to
   `shots/frames/` (encode them with ffmpeg)
@@ -108,8 +120,9 @@ Code layout (`wallpaper/js`):
 | `config.js` | Settings from the URL, Lively and Wallpaper Engine |
 | `nixie.js` | The tubes: glyphs, glass, mesh, glow, walnut base, scramble and flash |
 | `mech.js` | Dials, hands, gears, escapement; 3D tilt; stepped motion |
-| `paint.js` | Splats, flicks, watercolour, scratches, drafting marks, worldline diagram |
-| `atmos.js` | Dust, film scratches, textured border |
+| `paint.js` | Drafting marks, the worldline diagram, shape helpers |
+| `ink.js` | Living ink: painting, the spreading field, the schedule |
+| `atmos.js` | Dust, smoke, hot spots, light leaks, textured border, lens dust, grain |
 | `scene.js` | Composition, depth, parallax |
 | `display.js` | What the tubes show and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |

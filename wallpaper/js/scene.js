@@ -58,13 +58,13 @@ const Scene = (() => {
 
       // ---- In front of the meter ----
       new O({ kind: 'marks', x: 1900, y: 1250, spread: 300, depth: 0.35, alpha: 0.12, seed: 41 }),
-      new A({ x: 2470, y: 1440, depth: 0.9, blur: 2.5, res: 0.8, alpha: 1, rx: 0.12, ry: -0.15, seed: 7, drift: 18, shine: 0.35,
+      new A({ x: 2470, y: 1440, depth: 0.9, blur: 0.6, alpha: 1, rx: 0.12, ry: -0.15, seed: 7, drift: 18, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
         parts: [{ type: 'gear', style: 'solid', pitch: 72, teeth: 40, spokes: 6 }] }),
-      new A({ x: 2610, y: 20, depth: 0.75, blur: 2, res: 0.8, alpha: 1, rx: 0.1, ry: 0.15, seed: 8, drift: 14, shine: 0.35,
+      new A({ x: 2610, y: 20, depth: 0.75, blur: 0.5, alpha: 1, rx: 0.1, ry: 0.15, seed: 8, drift: 14, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
         parts: [{ type: 'gear', style: 'solid', pitch: 62, teeth: 26, spokes: 5 }] }),
-      new A({ x: -70, y: 1500, depth: 1.0, blur: 3, res: 0.7, alpha: 1, rx: 0.1, ry: 0.12, seed: 15, drift: 16, shine: 0.3,
+      new A({ x: -70, y: 1500, depth: 1.0, blur: 0.7, alpha: 1, rx: 0.1, ry: 0.12, seed: 15, drift: 16, shine: 0,
         beat: { period: 5, dur: 1.8, teeth: 0.25 },
         parts: [{ type: 'gear', style: 'solid', pitch: 58, teeth: 34, spokes: 6, curved: true }] }),
     ].sort((a, b) => a.depth - b.depth);

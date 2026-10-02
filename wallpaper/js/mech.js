@@ -209,10 +209,30 @@ const Mech = (() => {
     const lw = o.lw ?? Math.max(1, G.r * 0.008);
     g.lineJoin = 'round';
     if (solid) {
+      // Dark turned metal: a faint sheen toward the rim, concentric turning marks, and
+      // chamfered edges that catch a little light. All of it looks the same at any
+      // angle, so it stays right as the gear turns.
+      const fg = g.createRadialGradient(0, 0, G.r * 0.1, 0, 0, G.r);
+      fg.addColorStop(0, `rgb(${pal.solid})`);
+      fg.addColorStop(0.75, `rgb(${pal.solid})`);
+      fg.addColorStop(1, `rgba(${pal.rim},0.16)`);
       g.fillStyle = `rgb(${pal.solid})`;
       g.fill(p, 'evenodd');
-      g.strokeStyle = `rgba(${pal.rim},0.5)`;
-      g.lineWidth = Math.max(1.2, G.r * 0.009);
+      g.fillStyle = fg;
+      g.fill(p, 'evenodd');
+      g.save();
+      g.clip(p, 'evenodd');
+      g.strokeStyle = `rgb(${pal.rim})`;
+      for (let k = 0; k < 46; k++) {
+        g.globalAlpha = 0.025 + 0.04 * hash(k, 77);
+        ring(g, G.r * (0.17 + k * 0.018), Math.max(0.6, G.r * 0.002));
+      }
+      g.restore();
+      g.strokeStyle = `rgba(${pal.rim},0.6)`;
+      g.lineWidth = Math.max(1.2, G.r * 0.006);
+      g.stroke(p);
+      g.strokeStyle = `rgba(${pal.rim},0.16)`;
+      g.lineWidth = Math.max(2, G.r * 0.02);
       g.stroke(p);
     } else {
       // A faint metal disc, a little brighter toward the rim.
@@ -371,14 +391,14 @@ const Mech = (() => {
       for (const p of this.parts) {
         if (p.type === 'gear') {
           p.sp = bake(p.G.r, S, res, blur, g => drawGear(g, p.G, p, pal));
-          p.shineSp = bake(p.G.r, S, Math.min(res, 0.4), blur + p.G.r * 0.02, g => drawShine(g, p.G.r, false));
+          if (this.shine > 0) p.shineSp = bake(p.G.r, S, Math.min(res, 0.4), blur + p.G.r * 0.02, g => drawShine(g, p.G.r, false));
         } else if (p.type === 'dial') {
           const w = Math.max(1.2, p.r * 0.004);
           p.rings = [];
           p.rings.push({ sp: bake(p.r, S, res, blur, paint(g => drawChapter(g, p.r, w, p.numerals !== false))), turn: p.turn ?? 0 });
           if (p.ring24) p.rings.push({ sp: bake(p.r * 0.72, S, res, blur, paint(g => drawRing24(g, p.r * 0.72, w))), turn: -(p.turn ?? 1) * 0.7 });
           if (p.track !== false) p.rings.push({ sp: bake(p.r * 0.6, S, res, blur, paint(g => drawTrack(g, p.r * 0.6, w))), turn: (p.turn ?? 1) * 0.4 });
-          p.shineSp = bake(p.r, S, Math.min(res, 0.4), blur + p.r * 0.04, g => drawShine(g, p.r, true));
+          if (this.shine > 0) p.shineSp = bake(p.r, S, Math.min(res, 0.4), blur + p.r * 0.04, g => drawShine(g, p.r, true));
           if (p.hands !== false) {
             p.hand = {
               h: bake(p.r * 0.5, S, res, blur, paint(g => drawHand(g, p.r * 0.48, p.r * 0.028, w * 1.2, 'hour'))),
