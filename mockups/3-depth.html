@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mockup 3 — Depth</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas>
+<script src="sg.js"></script>
+<script>
+const ctx = SG.stage();
+const W = 2560, H = 1440, cx = W / 2, cy = 760;
+SG.background(ctx, { warmAt: [cx, cy, 900] });
+
+// Far plane: large, heavily defocused dials.
+SG.layer(ctx, g => {
+  SG.drawClock(g, { x: 560, y: 380, r: 520, alpha: 0.2, time: 7 * 3600 + 5 * 60 });
+  SG.drawClock(g, { x: 1820, y: 1320, r: 720, alpha: 0.17, rot: 0.2, time: 1 * 3600 + 40 * 60 });
+}, { blur: 10 });
+// Middle plane.
+SG.layer(ctx, g => {
+  SG.drawClock(g, { x: 1980, y: 360, r: 330, alpha: 0.14, time: 11 * 3600 + 55 * 60 + 20 });
+  SG.drawGear(g, { x: 1560, y: 140, r: 120, teeth: 28, alpha: 0.14, spokes: 5 });
+  SG.drawGear(g, { x: 330, y: 1080, r: 170, teeth: 40, alpha: 0.14, spokes: 6, angle: 0.4 });
+}, { blur: 4 });
+// Near plane: small, crisp.
+SG.layer(ctx, g => {
+  SG.drawClock(g, { x: 2230, y: 1130, r: 150, alpha: 0.12, time: 2 * 3600 + 17 * 60 + 44 });
+  SG.drawGear(g, { x: 2130, y: 975, r: 54, teeth: 14, alpha: 0.12, spokes: 3, angle: 0.2 });
+  SG.drawClock(g, { x: 640, y: 300, r: 90, alpha: 0.13, inner: false, time: 9 * 3600 + 31 * 60 });
+}, { blur: 0.4 });
+
+SG.drawMeter(ctx, { cx, cy, tubeH: 250, text: '1.048596' });
+
+// Foreground: a huge gear edge, out of focus, between viewer and meter.
+SG.layer(ctx, g => {
+  SG.drawGear(g, { x: -40, y: 1520, r: 520, teeth: 72, alpha: 0.22, spokes: 6, fill: 0.6, lw: 4 });
+}, { blur: 22 });
+
+SG.dust(ctx, { seed: 21, count: 240, near: [cx, cy, 340], bokeh: 10 });
+SG.vignette(ctx, 0.9);
+SG.dither(ctx);
+</script></body></html>

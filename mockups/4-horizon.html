@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mockup 4 — Horizon</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas>
+<script src="sg.js"></script>
+<script>
+const ctx = SG.stage();
+const W = 2560, H = 1440, cx = W / 2;
+const tubeH = 220, my = 790;
+const horizon = my + tubeH / 2 + tubeH * 0.03;
+SG.background(ctx);
+
+// Everything above the black glass, drawn once and then mirrored.
+const above = SG.makeCanvas(W, H), a = above.getContext('2d');
+SG.layer(a, g => {
+  g.save();
+  g.beginPath(); g.rect(0, 0, W, horizon); g.clip();
+  SG.drawClock(g, { x: cx, y: horizon + 60, r: 880, alpha: 0.09, time: 10 * 3600 + 9 * 60 + 31 });
+  g.restore();
+}, { blur: 1.5 });
+SG.drawMeter(a, { cx, cy: my, tubeH, text: '1.048596', plinth: false });
+
+ctx.drawImage(above, 0, 0);
+
+// Reflection on the surface, fading quickly with distance.
+SG.layer(ctx, g => {
+  g.save();
+  g.translate(0, horizon * 2);
+  g.scale(1, -1);
+  g.drawImage(above, 0, 0);
+  g.restore();
+}, {
+  blur: 3, alpha: 0.22,
+  mask: g => {
+    const m = g.createLinearGradient(0, horizon, 0, horizon + 260);
+    m.addColorStop(0, 'rgba(0,0,0,1)');
+    m.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = m; g.fillRect(0, horizon, W, H - horizon);
+  },
+});
+
+// A single hairline of light where glass meets dark.
+const hl = ctx.createLinearGradient(0, 0, W, 0);
+hl.addColorStop(0, 'rgba(255,120,40,0)');
+hl.addColorStop(0.5, 'rgba(255,120,40,0.10)');
+hl.addColorStop(1, 'rgba(255,120,40,0)');
+ctx.fillStyle = hl;
+ctx.fillRect(0, horizon, W, 1);
+
+SG.dust(ctx, { seed: 5, count: 160, near: [cx, my, 300] });
+SG.vignette(ctx, 0.92);
+SG.dither(ctx);
+</script></body></html>
