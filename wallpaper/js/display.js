@@ -23,7 +23,7 @@ const Display = (() => {
       this.interludeUntil = -1;
       this.inInterlude = false;
       this.nextShift = Infinity;
-      this.onShift = null; // called with t when clocks should spin
+      this.onShift = null; // (t, worldline): clocks spin; worldline is true for a real shift
     }
 
     schedule(t) { this.nextShift = t + MIN_GAP + this.random() * (MAX_GAP - MIN_GAP); }
@@ -45,7 +45,7 @@ const Display = (() => {
       this.worldline = this.pickWorldline();
       if (this.mode !== 'worldline') this.interludeUntil = t + INTERLUDE;
       this.meter.startShift(t);
-      this.onShift?.(t);
+      this.onShift?.(t, true);
       this.schedule(t);
     }
 
@@ -55,7 +55,7 @@ const Display = (() => {
       if (!Config.get('shift')) return;
       if (this.mode === 'worldline') { this.shift(t); return; }
       this.meter.flash(t);
-      this.onShift?.(t);
+      this.onShift?.(t, false);
     }
 
     setMode(m, t) {

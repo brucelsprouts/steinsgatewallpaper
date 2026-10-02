@@ -9,31 +9,38 @@
   // Debug hooks (not settings): ?now=2026-10-02T09:59:55 fakes the wall clock,
   // ?still=3.2 renders a single frame that many seconds after boot, ?shiftAt=5 fires
   // a worldline shift then, ?cursor=0.8,-0.4 pins the parallax camera, ?worldline=1.048596
-  // pins the starting worldline.
+  // pins the starting worldline, ?seed=3 picks the ink (stills and recordings use 1),
+  // ?inkRest=20 shortens how long each bloom of ink rests before dissolving.
   const fakeNow = q.get('now') ? new Date(q.get('now')).getTime() : null;
   const still = q.has('still') ? Number(q.get('still')) : null;
   const shiftAt = q.has('shiftAt') ? Number(q.get('shiftAt')) : null;
   const cursor = q.get('cursor') ? q.get('cursor').split(',').map(Number) : null;
   const manual = q.has('manual'); // tools/record.html drives frames itself
+  const seed = q.has('seed') ? Number(q.get('seed')) : still != null || manual ? 1 : (Math.random() * 1e9) | 0;
+  const inkRest = q.has('inkRest') ? Number(q.get('inkRest')) : null;
   let simT = 0;
   const clock = () => new Date(fakeNow != null ? fakeNow + simT * 1000 : Date.now());
   const theme = () => (Config.get('glow') === 'white' ? 'cold' : 'warm');
 
-  const scene = new Scene.Scene();
+  const scene = new Scene.Scene(Kit.rng(seed), inkRest != null ? { rest: [inkRest, inkRest] } : {});
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
   const controller = new Display.Controller(meter, clock);
-  controller.onShift = t => scene.shifts.push(t);
+  // Clocks spin on every shift and click; a real worldline shift also brings fresh ink.
+  controller.onShift = (t, worldline) => {
+    scene.shifts.push(t);
+    if (worldline) scene.ink.shift(t);
+  };
   if (q.get('worldline')) controller.worldline = q.get('worldline'); // debug: pin the boot worldline
   if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.settle(); }
 
-  let view, vignette, dither, grunge, scratches;
+  let view, vignette, grunge, grain;
 
   function buildSprites() {
     meter.build(view.S, theme());
     scene.build(view.S, view, theme());
     grunge = Atmos.grunge(view);
-    scratches = Atmos.scratches(view);
-    // Vignette at quarter resolution with an eased falloff; dither hides 8-bit banding.
+    grain = Atmos.grain(view, { x: Scene.METER.cx, y: Scene.METER.cy, rx: 560, ry: 230 });
+    // Vignette at quarter resolution with an eased falloff.
     const k = 0.25, W = view.W, H = view.H;
     vignette = Kit.canvas(W * k, H * k);
     const g = vignette.getContext('2d');
@@ -44,19 +51,6 @@
     }
     g.fillStyle = r;
     g.fillRect(0, 0, W * k, H * k);
-    dither = ditherPattern();
-  }
-
-  // Static additive noise tile.
-  function ditherPattern() {
-    const n = Kit.canvas(256, 256), g = n.getContext('2d');
-    const img = g.createImageData(256, 256), r = Kit.rng(99);
-    for (let i = 0; i < img.data.length; i += 4) {
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = r() * 255;
-      img.data[i + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-    return ctx.createPattern(n, 'repeat');
   }
 
   function resize() {
@@ -86,16 +80,13 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    // Textured border, then the smooth vignette, then scratches "on the glass".
+    // Textured border, then the smooth vignette, then grain over everything (it also
+    // hides 8-bit banding in the dark gradients).
     ctx.drawImage(grunge, 0, 0, view.W, view.H);
     ctx.drawImage(vignette, 0, 0, view.W, view.H);
-    ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = 0.22;
-    ctx.drawImage(scratches, 0, 0);
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.016;
-    ctx.fillStyle = dither;
-    ctx.fillRect(0, 0, view.W, view.H);
+    ctx.globalCompositeOperation = 'difference';
+    ctx.drawImage(grain, 0, 0, view.W, view.H);
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   function step(t) {
@@ -156,11 +147,13 @@
     syncRunning();
   }
 
-  // Console helper: SG.shift() triggers a worldline shift. The rest drive recordings.
+  // Console helpers: SG.shift() triggers a worldline shift, SG.ink() brings fresh ink.
+  // The rest drive recordings.
   let simLast = 0;
   window.SG = {
     config: Config,
     shift: () => controller.shift(manual ? simLast : elapsed()),
+    ink: () => scene.ink.shift(manual ? simLast : elapsed()),
     click: () => controller.click(manual ? simLast : elapsed()),
     pointer: (x, y) => scene.pointer(x, y),
     renderAt(t) {

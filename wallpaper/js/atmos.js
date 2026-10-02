@@ -1,6 +1,6 @@
 'use strict';
-// Atmosphere over the whole frame: drifting dust lit by the tubes, fine film
-// scratches on the "screen", and a grungy textured border under the vignette.
+// Atmosphere over the whole frame: drifting dust lit by the tubes, a grungy textured
+// border under the vignette, and film grain over everything.
 const Atmos = (() => {
   const { TAU, canvas, rng, fbm2, smooth } = Kit;
 
@@ -58,48 +58,29 @@ const Atmos = (() => {
     }
   }
 
-  // ---------- Film scratches: fixed hairlines and nicks, drawn with `screen` ----------
-  function scratches(view, seed = 77) {
-    const { W, H } = view, S = Math.max(0.5, view.S);
-    const c = canvas(W, H), g = c.getContext('2d'), r = rng(seed);
-    g.lineCap = 'round';
-    g.strokeStyle = '#fff';
-    // Long, mostly vertical hairlines that fade in and out along their length.
-    for (let k = 0; k < 9; k++) {
-      const x0 = r() * W, y0 = r() * H * 0.8, len = H * (0.08 + r() * 0.35), bow = (r() - 0.5) * W * 0.03;
-      const lean = (r() - 0.5) * 0.08, a0 = 0.18 + r() * 0.3, seedK = r() * 100;
-      g.lineWidth = (0.5 + r() * 0.7) * S;
-      let px = x0, py = y0;
-      for (let i = 1; i <= 60; i++) {
-        const u = i / 60, x = x0 + lean * len * u + Math.sin(u * Math.PI) * bow, y = y0 + len * u;
-        g.globalAlpha = a0 * smooth(0.25, 0.7, Kit.noise(u * 6 + seedK, k));
-        g.beginPath(); g.moveTo(px, py); g.lineTo(x, y); g.stroke();
-        px = x; py = y;
+  // ---------- Grain: fine speckle, strongest at the edges and around the glow ----------
+  // Half resolution, so each grain covers about two pixels. Drawn with `difference`:
+  // on the dark border it lifts into speckle, on the bright glow it breaks it up a little.
+  const AMP = 40;
+  function grain(view, hot, seed = 61) {
+    const k = 0.5, w = Math.max(1, Math.ceil(view.W * k)), h = Math.max(1, Math.ceil(view.H * k));
+    const c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
+    const S = view.S * k, hx = view.ox * k + hot.x * S, hy = view.oy * k + hot.y * S;
+    // Separable terms: the edge falloff and the hot spot, per column and per row.
+    const ex = new Float32Array(w), gx = new Float32Array(w), ey = new Float32Array(h), gy = new Float32Array(h);
+    for (let x = 0; x < w; x++) { ex[x] = Math.abs(x / w * 2 - 1) ** 3; gx[x] = Math.exp(-(((x - hx) / (hot.rx * S)) ** 2)); }
+    for (let y = 0; y < h; y++) { ey[y] = Math.abs(y / h * 2 - 1) ** 3; gy[y] = Math.exp(-(((y - hy) / (hot.ry * S)) ** 2)); }
+    let s = seed >>> 0 || 1;
+    for (let y = 0, i = 0; y < h; y++) {
+      for (let x = 0; x < w; x++, i += 4) {
+        const edge = smooth(0.55, 1.05, Math.cbrt(ex[x] + ey[y]));
+        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+        const n = (s >>> 0) / 4294967296;
+        const v = n * n * (0.06 + 0.5 * edge + 0.45 * gx[x] * gy[y]) * AMP;
+        d[i] = v; d[i + 1] = v * 0.95; d[i + 2] = v * 0.88; d[i + 3] = 255;
       }
     }
-    // Short nicks and arcs, a little denser toward the edges.
-    for (let k = 0; k < 120; k++) {
-      const x = r() * W, y = r() * H;
-      const edge = Math.max(Math.abs(x / W * 2 - 1), Math.abs(y / H * 2 - 1));
-      if (r() > 0.35 + edge * 0.65) continue;
-      const a = r() * TAU, len = (6 + r() * 34) * S;
-      g.globalAlpha = 0.25 + r() * 0.45;
-      g.lineWidth = (0.4 + r() * 0.6) * S;
-      g.beginPath();
-      g.moveTo(x, y);
-      g.quadraticCurveTo(x + Math.cos(a + 0.4) * len * 0.5, y + Math.sin(a + 0.4) * len * 0.5, x + Math.cos(a) * len, y + Math.sin(a) * len);
-      g.stroke();
-    }
-    // Light flecks, mostly near the border.
-    g.fillStyle = '#fff';
-    for (let k = 0; k < 900; k++) {
-      const x = r() * W, y = r() * H;
-      const edge = Math.max(Math.abs(x / W * 2 - 1), Math.abs(y / H * 2 - 1));
-      if (r() > Math.pow(edge, 3)) continue;
-      g.globalAlpha = 0.2 + r() * 0.5;
-      const s = (0.6 + r() * 1.6) * S;
-      g.fillRect(x, y, s, s);
-    }
+    g.putImageData(img, 0, 0);
     return c;
   }
 
@@ -125,5 +106,5 @@ const Atmos = (() => {
     return c;
   }
 
-  return { Dust, scratches, grunge };
+  return { Dust, grain, grunge };
 })();
