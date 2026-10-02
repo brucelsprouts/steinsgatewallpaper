@@ -1,13 +1,14 @@
 'use strict';
-// Atmosphere over the whole frame: drifting dust lit by the tubes, very light smoke,
-// hot spots and film light leaks, a grungy textured border under the vignette, dust
-// on the lens and film grain over everything.
+// Atmosphere over the whole frame: drifting dust lit by the tubes and by soft light
+// shafts, very light smoke, hot spots, film light leaks drifting along the edges, a
+// grungy textured border under the vignette, dust wandering on the lens and film grain
+// over everything.
 const Atmos = (() => {
   const { TAU, canvas, rng, fbm2, pfbm2, smooth } = Kit;
 
   // ---------- Dust ----------
   class Dust {
-    constructor(n = 70, seed = 5) {
+    constructor(n = 110, seed = 5) {
       const r = rng(seed);
       this.motes = Array.from({ length: n }, () => ({
         x: r() * 2560, y: r() * 1540,
@@ -18,6 +19,7 @@ const Atmos = (() => {
         a: 0.3 + r() * 0.7,
       }));
       this.cam = { x: 0, y: 0 };
+      this.beam = null; // (x, y, t) => how strongly light shafts light that point
     }
 
     build(S, theme) {
@@ -35,7 +37,8 @@ const Atmos = (() => {
       this.plain = dot('214,208,200');
     }
 
-    // `light` is the meter centre in design px: motes near it catch the glow.
+    // `light` is the meter centre in design px: motes near it catch the glow, and so do
+    // motes drifting through a light shaft.
     draw(ctx, view, t, light) {
       const P = 42, W = 2660, H = 1540;
       ctx.globalCompositeOperation = 'screen';
@@ -46,13 +49,14 @@ const Atmos = (() => {
         y = ((y + 50) % H + H) % H - 50;
         const d2 = (x - light.x) ** 2 + ((y - light.y) * 1.6) ** 2;
         const glow = Math.exp(-d2 / (2 * 330 * 330));
+        const lit = this.beam ? this.beam(x, y, t) : 0;
         const near = m.depth > 0.8;                // close to the lens: big, soft, faint
-        const size = m.size * (near ? 3.2 : 1) * (1 + glow * 0.4);
+        const size = m.size * (near ? 3.2 : 1) * (1 + glow * 0.4 + lit * 0.3);
         const twinkle = 0.75 + 0.25 * Math.sin(t * 0.9 + m.phase * 3);
-        ctx.globalAlpha = Math.min(1, m.a * (0.07 + 0.3 * glow) * twinkle * (near ? 0.45 : 1));
+        ctx.globalAlpha = Math.min(1, m.a * (0.07 + 0.3 * glow + 0.45 * lit) * twinkle * (near ? 0.45 : 1));
         const s = size * 3.2 * view.S;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.drawImage(glow > 0.15 ? this.lit : this.plain, view.ox + x * view.S - s / 2, view.oy + y * view.S - s / 2, s, s);
+        ctx.drawImage(glow > 0.15 || lit > 0.2 ? this.lit : this.plain, view.ox + x * view.S - s / 2, view.oy + y * view.S - s / 2, s, s);
       }
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
@@ -128,8 +132,8 @@ const Atmos = (() => {
     }
   }
 
-  // ---------- Light: soft hot spots on the clockwork, and film light leaks ----------
-  // Both at an eighth of the resolution: they are nothing but soft gradients.
+  // ---------- Light: hot spots on the clockwork, light shafts, and film light leaks ----------
+  // All soft gradients, so all drawn from small images.
   function glowSpot(g, x, y, rx, ry, rgb, a) {
     g.save();
     g.translate(x, y);
@@ -143,72 +147,238 @@ const Atmos = (() => {
     g.restore();
   }
 
+  // Light shafts fall from beyond the upper right corner into the clockwork, and fade
+  // well before they reach the tubes. Each sways a little and comes and goes on its own.
+  const SUN = { x: 2950, y: -420 }, REACH = 3000;
+  const BEAMS = [
+    { a: 2.22, w: 110, i: 0.8 }, { a: 2.31, w: 70, i: 1 }, { a: 2.40, w: 150, i: 0.6 },
+    { a: 2.49, w: 60, i: 0.9 }, { a: 2.58, w: 120, i: 0.55 },
+  ];
+  const RAYS = 0.06;
+  // Along a shaft (0 at the sun, 1 at its far end) and across it (a fraction of its
+  // half-width, which grows with distance).
+  const along = u => smooth(0, 0.15, u) * (1 - smooth(0.35, 0.8, u));
+  const spread = u => 0.15 + 0.35 * u;
+
+  function shaftSprite() {
+    const w = 256, h = 64, c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const u = x / w, v = (y + 0.5) / h * 2 - 1, i = (y * w + x) * 4;
+        img.data[i] = 255; img.data[i + 1] = 222; img.data[i + 2] = 184;
+        img.data[i + 3] = 255 * along(u) * Math.exp(-((v / spread(u)) ** 2));
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
+  // Leak colours, hot core to fringe: mostly warm, now and then magenta.
+  const LEAKS = [
+    { w: 0.35, stops: ['255,226,180', '255,150,70', '220,70,40'] },   // orange
+    { w: 0.25, stops: ['255,205,170', '245,95,95', '170,30,80'] },    // red
+    { w: 0.25, stops: ['255,240,190', '250,185,80', '205,100,35'] },  // amber
+    { w: 0.15, stops: ['255,210,235', '225,100,185', '120,40,150'] }, // magenta
+  ];
+  const EDGES = ['top', 'right', 'bottom', 'left'];
+
+  // A leak's light: a long glow, hot in the middle and turning toward its fringe colour,
+  // with a smaller glow off-centre so no two look alike.
+  function leakSprite(l) {
+    const w = 160, h = 96, c = canvas(w, h), g = c.getContext('2d'), [hot, mid, rim] = l.pal.stops;
+    g.globalCompositeOperation = 'lighter';
+    const blob = (x, y, rx, ry, a) => {
+      g.save();
+      g.translate(x, y);
+      g.scale(1, ry / rx);
+      const rg = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+      rg.addColorStop(0, `rgba(${hot},${a})`);
+      rg.addColorStop(0.3, `rgba(${mid},${a * 0.7})`);
+      rg.addColorStop(0.65, `rgba(${rim},${a * 0.3})`);
+      rg.addColorStop(1, `rgba(${rim},0)`);
+      g.fillStyle = rg;
+      g.fillRect(-rx, -rx, rx * 2, rx * 2);
+      g.restore();
+    };
+    blob(w / 2, h / 2, w / 2, h / 2, 0.85);
+    blob(w * l.knot[0], h * l.knot[1], w * l.knot[2], h * l.knot[2] * 1.2, 0.5);
+    return c;
+  }
+
   class Light {
-    constructor() { this.flareAt = -1e9; this.cam = { x: 0, y: 0 }; }
+    // `random` drives the leaks (seed it for repeatable stills).
+    constructor(random = Math.random) {
+      this.random = random;
+      this.flareAt = -1e9;
+      this.cam = { x: 0, y: 0 };
+      this.leaks = [];
+      this.next = null;
+      this.lastEdge = null;
+    }
 
     build(view) {
       const k = 1 / 8, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k), S = view.S * k;
       const X = x => (view.ox + x * view.S) * k, Y = y => (view.oy + y * view.S) * k;
-      const make = fn => { const c = canvas(w, h), g = c.getContext('2d'); g.globalCompositeOperation = 'lighter'; fn(g); return c; };
       // Hot spots: light pooling on the clockwork.
-      this.hot = make(g => {
-        glowSpot(g, X(2050), Y(430), 560 * S, 470 * S, '255,196,140', 0.55);
-        glowSpot(g, X(1720), Y(1130), 420 * S, 300 * S, '150,205,215', 0.32);
-        glowSpot(g, X(2380), Y(930), 300 * S, 260 * S, '255,176,120', 0.3);
-      });
-      // Leaks: warm light bleeding in past the edge of the film, one on each side.
-      this.leaks = [
-        make(g => {
-          glowSpot(g, X(2600), Y(260), 620 * S, 900 * S, '255,128,60', 0.75);
-          glowSpot(g, X(2560), Y(120), 300 * S, 520 * S, '255,214,150', 0.6);
-        }),
-        make(g => {
-          glowSpot(g, X(-60), Y(1380), 700 * S, 520 * S, '228,70,96', 0.6);
-          glowSpot(g, X(160), Y(1440), 360 * S, 260 * S, '255,150,110', 0.45);
-        }),
-      ];
+      this.hot = canvas(w, h);
+      const g = this.hot.getContext('2d');
+      g.globalCompositeOperation = 'lighter';
+      glowSpot(g, X(2050), Y(430), 560 * S, 470 * S, '255,196,140', 0.55);
+      glowSpot(g, X(1720), Y(1130), 420 * S, 300 * S, '150,205,215', 0.32);
+      glowSpot(g, X(2330), Y(860), 280 * S, 240 * S, '255,176,120', 0.24);
+      if (!this.shaft) this.shaft = shaftSprite();
     }
 
-    // A worldline shift washes the frame with a burst of leaked light.
-    flare(t) { this.flareAt = t; }
+    // ---- Leaks: light bleeding in past the edge of the film, drifting along it ----
 
-    // 'hot' goes in with the scene; 'leak' goes over everything, past the vignette.
+    // One or two at a time, each from a different edge than the last, every half
+    // minute or so; one is already there at the start.
+    update(t) {
+      const r = this.random;
+      this.leaks = this.leaks.filter(l => t < l.born + l.life);
+      if (this.next == null) { this.add(t, 0.2 + r() * 0.3); this.next = t + 8 + r() * 12; }
+      if (t >= this.next) {
+        if (this.leaks.length < 2) this.add(t);
+        this.next = t + 20 + r() * 25;
+      }
+    }
+
+    // A new leak, `at` of the way through its life already, fading in over `fadeIn` s.
+    add(t, at = 0, fadeIn = 8 + this.random() * 6) {
+      const r = this.random, edges = EDGES.filter(e => e !== this.lastEdge);
+      const edge = edges[Math.floor(r() * edges.length)];
+      let u = r() * LEAKS.reduce((s, p) => s + p.w, 0), pal = LEAKS[0];
+      for (const p of LEAKS) if ((u -= p.w) <= 0) { pal = p; break; }
+      const from = 0.1 + r() * 0.8, travel = (r() < 0.5 ? -1 : 1) * (0.25 + r() * 0.25), life = 55 + r() * 40;
+      this.lastEdge = edge;
+      this.leaks.push({
+        edge, pal, knot: [0.3 + r() * 0.4, 0.35 + r() * 0.3, 0.18 + r() * 0.12],
+        born: t - at * life, life, fadeIn, fadeOut: 14 + r() * 8,
+        from, to: from + travel, len: 1100 + r() * 700, thick: 650 + r() * 350, out: 0.08 + r() * 0.22,
+        peak: 0.14 + r() * 0.08, ph: r() * TAU,
+      });
+      return this.leaks[this.leaks.length - 1];
+    }
+
+    // A worldline shift washes the frame with a burst of leaked light, and brings a new leak.
+    flare(t) {
+      this.flareAt = t;
+      if (this.leaks.length < 3) this.add(t, 0, 2.5);
+    }
+
+    // Where a leak is and how bright, at time t: its centre sits a little outside the
+    // frame (\`out\` of its thickness) and slides along the edge over its life.
+    leakAt(l, t) {
+      const age = t - l.born, p = smooth(0, 1, age / l.life), u = l.from + (l.to - l.from) * p;
+      const env = smooth(0, l.fadeIn, age) * (1 - smooth(l.life - l.fadeOut, l.life, age));
+      const d = l.thick * l.out, side = l.edge === 'top' || l.edge === 'bottom';
+      const x = side ? u * 2560 : l.edge === 'left' ? -d : 2560 + d;
+      const y = side ? (l.edge === 'top' ? -d : 1440 + d) : u * 1440;
+      return { x, y, rot: side ? 0 : Math.PI / 2, a: l.peak * env * (0.85 + 0.15 * Math.sin(t / 13 + l.ph)) };
+    }
+
+    // ---- Shafts ----
+
+    // Each shaft's angle and strength at time t.
+    beams(t) {
+      return BEAMS.map((b, i) => ({
+        a: b.a + 0.015 * Math.sin(t / (41 + 5 * i) + i * 1.7),
+        w: b.w,
+        i: b.i * (0.55 + 0.45 * Math.sin(t / (29 + 7 * i) + i * 2.3)),
+      }));
+    }
+
+    // How strongly the shafts light the point (x, y), 0 to about 1: dust drifting
+    // through them catches the light.
+    beamAt(x, y, t) {
+      const dx = x - SUN.x, dy = y - SUN.y, d = Math.hypot(dx, dy), u = d / REACH;
+      if (u <= 0 || u >= 1) return 0;
+      const ang = Math.atan2(dy, dx);
+      let v = 0;
+      for (const b of this.beams(t)) {
+        const across = d * Math.sin(ang - b.a) / (b.w * 1.2);
+        v += b.i * Math.exp(-((across / spread(u)) ** 2));
+      }
+      return Math.min(1, v * along(u));
+    }
+
+    // 'hot' and 'rays' go in with the scene; 'leak' goes over everything, past the vignette.
     draw(ctx, view, t, pass) {
+      const S = view.S, burst = 1 + 2.2 * Math.exp(-Math.max(0, t - this.flareAt) / 1.3) * (t >= this.flareAt ? 1 : 0);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'screen';
       if (pass === 'hot') {
-        const dx = -this.cam.x * 42 * 0.6 * view.S, dy = -this.cam.y * 42 * 0.4 * view.S;
+        const dx = -this.cam.x * 42 * 0.6 * S, dy = -this.cam.y * 42 * 0.4 * S;
         ctx.globalAlpha = 0.12 * (0.85 + 0.15 * Math.sin(t / 19));
         ctx.drawImage(this.hot, dx, dy, view.W, view.H);
+      } else if (pass === 'rays') {
+        const ox = view.ox + (SUN.x - this.cam.x * 42 * 0.5) * S, oy = view.oy + (SUN.y - this.cam.y * 42 * 0.35) * S;
+        for (const b of this.beams(t)) {
+          const c = Math.cos(b.a) * S, s = Math.sin(b.a) * S, h = b.w * 2.4;
+          ctx.setTransform(c, s, -s, c, ox, oy);
+          ctx.globalAlpha = Math.min(1, RAYS * b.i * (1 + (burst - 1) * 0.3));
+          ctx.drawImage(this.shaft, 0, -h / 2, REACH, h);
+        }
       } else {
-        const burst = 1 + 2.2 * Math.exp(-Math.max(0, t - this.flareAt) / 1.3) * (t >= this.flareAt ? 1 : 0);
-        this.leaks.forEach((c, i) => {
-          const breathe = 0.5 + 0.5 * Math.sin(t / (47 + i * 14) + i * 2.1);
-          ctx.globalAlpha = Math.min(1, 0.12 * (0.25 + 0.75 * breathe) * burst);
-          ctx.drawImage(c, Math.sin(t / (71 + i * 9)) * 30 * view.S, 0, view.W, view.H);
-        });
+        for (const l of this.leaks) {
+          const p = this.leakAt(l, t);
+          if (p.a <= 0) continue;
+          if (!l.sprite) l.sprite = leakSprite(l);
+          const c = Math.cos(p.rot) * S, s = Math.sin(p.rot) * S;
+          ctx.setTransform(c, s, -s, c, view.ox + p.x * S, view.oy + p.y * S);
+          ctx.globalAlpha = Math.min(1, p.a * burst);
+          ctx.drawImage(l.sprite, -l.len / 2, -l.thick / 2, l.len, l.thick);
+        }
       }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     }
   }
 
-  // ---------- Lens dust: fine specks sitting on the glass ----------
-  // Sparse, mostly toward the edges; drawn with `screen` over everything.
-  function lensDust(view, seed = 23) {
-    const k = 0.5, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k), S = view.S * k;
-    const c = canvas(w, h), g = c.getContext('2d'), r = rng(seed);
-    const edge = (x, y) => smooth(0.4, 1.05, Math.cbrt(Math.abs(x / w * 2 - 1) ** 3 + Math.abs(y / h * 2 - 1) ** 3));
-    g.fillStyle = '#efe4d6';
-    for (let i = 0; i < 900; i++) {
-      const x = r() * w, y = r() * h;
-      if (r() > 0.06 + 0.94 * edge(x, y)) continue;
-      g.globalAlpha = 0.1 + r() * 0.35;
-      g.beginPath();
-      g.arc(x, y, (0.3 + Math.pow(r(), 4) * 1.2) * Math.max(0.7, S * 2), 0, TAU);
-      g.fill();
+  // ---------- Lens dust: fine specks on the glass, drifting slowly about ----------
+  // Seen mostly toward the edges, as before, but each speck wanders on its way.
+  class LensDust {
+    constructor(n = 600, seed = 23) {
+      const r = rng(seed);
+      this.specks = Array.from({ length: n }, () => {
+        const a = r() * TAU, v = 0.6 + r() * 2.4;
+        return {
+          x: r() * 2600, y: r() * 1480, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+          size: 0.3 + Math.pow(r(), 4) * 1.2, a: 0.1 + r() * 0.35, ph: r() * TAU, wob: 4 + r() * 14,
+        };
+      });
     }
-    return c;
+
+    build() {
+      if (this.dot) return;
+      const R = 8, c = canvas(R * 2, R * 2), g = c.getContext('2d'), rg = g.createRadialGradient(R, R, 0, R, R, R);
+      rg.addColorStop(0, 'rgba(239,228,214,1)');
+      rg.addColorStop(0.5, 'rgba(239,228,214,0.55)');
+      rg.addColorStop(1, 'rgba(239,228,214,0)');
+      g.fillStyle = rg;
+      g.fillRect(0, 0, R * 2, R * 2);
+      this.dot = c;
+    }
+
+    draw(ctx, view, t) {
+      const W = 2600, H = 1480, px = Math.max(1.4, view.S * 2.8);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'screen';
+      for (const s of this.specks) {
+        let x = s.x + s.vx * t + Math.sin(t / 17 + s.ph) * s.wob, y = s.y + s.vy * t + Math.cos(t / 23 + s.ph) * s.wob;
+        x = ((x % W) + W) % W - 20;
+        y = ((y % H) + H) % H - 20;
+        const edge = smooth(0.4, 1.05, Math.cbrt(Math.abs(x / 1280 - 1) ** 3 + Math.abs(y / 720 - 1) ** 3));
+        const a = s.a * (0.06 + 0.94 * edge) * 0.35 * (0.85 + 0.15 * Math.sin(t / 7 + s.ph * 3));
+        if (a < 0.004) continue;
+        const d = s.size * px * 3.2;
+        ctx.globalAlpha = a;
+        ctx.drawImage(this.dot, view.ox + x * view.S - d / 2, view.oy + y * view.S - d / 2, d, d);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
   }
 
   // ---------- Grain: fine speckle, strongest at the edges and around the glow ----------
@@ -259,5 +429,5 @@ const Atmos = (() => {
     return c;
   }
 
-  return { Dust, Smoke, Light, lensDust, grain, grunge };
+  return { Dust, Smoke, Light, LensDust, grain, grunge };
 })();

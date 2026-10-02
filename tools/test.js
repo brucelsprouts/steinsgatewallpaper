@@ -178,17 +178,17 @@ function simulate(field, secs, each, from = 0) {
   for (let t = from; t <= secs; t += 1) { field.update(t); each(field, t); }
 }
 
-test('ink: boots with three resting elements and forms a fourth within seconds', () => {
+test('ink: boots with four resting elements and forms a fifth within seconds', () => {
   const { Kit, Ink } = loadInk();
   const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
   f.update(0);
-  assert.strictEqual(f.blooms.length, 3);
-  assert.ok(f.blooms.every(b => b.phase(0)[0] === 'resting'));
-  for (let t = 0; t <= 7; t += 0.5) f.update(t);
   assert.strictEqual(f.blooms.length, 4);
+  assert.ok(f.blooms.every(b => b.phase(0)[0] === 'resting'));
+  for (let t = 0; t <= 6; t += 0.5) f.update(t);
+  assert.strictEqual(f.blooms.length, 5);
 });
 
-test('ink: over three hours, never crowded or bare, zones and colours never shared', () => {
+test('ink: over three hours, never crowded or bare, zones never shared, colours never close', () => {
   const { Kit, Ink } = loadInk();
   for (const seed of [1, 2, 3]) {
     const f = new Ink.Field(Kit.rng(seed), { x: 0, y: 0 });
@@ -196,14 +196,31 @@ test('ink: over three hours, never crowded or bare, zones and colours never shar
     simulate(f, 3 * 3600, (field, t) => {
       const n = field.blooms.length, active = field.active(t);
       assert.ok(active <= Ink.MAX, `${active} elements at ${t}s`);
-      if (t > 10) assert.ok(n >= 2 && active >= 1, `only ${n} elements (${active} not dissolving) at ${t}s`);
+      if (t > 10) assert.ok(n >= 3 && active >= 2, `only ${n} elements (${active} not dissolving) at ${t}s`);
       assert.strictEqual(new Set(field.blooms.map(b => b.zone)).size, n);
-      assert.strictEqual(new Set(field.blooms.map(b => b.color)).size, n);
+      for (const a of field.blooms) {
+        for (const b of field.blooms) {
+          if (a !== b && a.color === b.color) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= Ink.NEAR, `two ${a.color} elements close together at ${t}s`);
+        }
+      }
       const newest = field.blooms[field.blooms.length - 1];
       if (newest !== last) { spawned++; last = newest; }
     });
-    assert.ok(spawned > 60, `only ${spawned} elements in three hours`);
+    assert.ok(spawned > 400, `only ${spawned} elements in three hours`);
   }
+});
+
+test('ink: elements keep spreading and floating after they form', () => {
+  const { Kit, Ink } = loadInk();
+  const f = new Ink.Field(Kit.rng(3), { x: 0, y: 0 });
+  f.update(0);
+  const b = f.spawn(0, 'blot');
+  const t1 = b.born + b.form + b.dry + 5, t2 = t1 + 20;
+  const s1 = Ink.state(b, t1), s2 = Ink.state(b, t2);
+  assert.ok(s2.tau > s1.tau + 0.05, `spread only ${s2.tau - s1.tau} in 20 s`);
+  const moved = Math.hypot(s2.move.x - s1.move.x, s2.move.y - s1.move.y);
+  assert.ok(moved > 5, `drifted only ${moved} px in 20 s`);
+  assert.ok(s2.move.s > s1.move.s && s2.move.a !== s1.move.a, 'neither grew nor turned');
 });
 
 test('ink: kinds vary and never repeat back to back', () => {
@@ -221,14 +238,14 @@ test('ink: kinds vary and never repeat back to back', () => {
 test('ink: a worldline shift throws a splash and dissolves the oldest', () => {
   const { Kit, Ink } = loadInk();
   const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
-  simulate(f, 20, () => {});
-  assert.strictEqual(f.active(20), Ink.MAX);
-  const oldest = [...f.blooms].sort((a, b) => a.born - b.born)[0];
-  f.shift(20);
+  let t = 0;
+  while (f.active(t) < Ink.MAX) f.update(++t);
+  const oldest = f.blooms.filter(b => b.phase(t)[0] === 'resting').sort((a, b) => a.born - b.born)[0];
+  f.shift(t);
   const splash = f.blooms[f.blooms.length - 1];
   assert.strictEqual(splash.kind, 'splash');
-  assert.strictEqual(oldest.phase(20.5)[0], 'fading');
-  simulate(f, 120, () => {}, 21);
+  assert.strictEqual(oldest.phase(t + 0.5)[0], 'fading');
+  simulate(f, t + 100, () => {}, t + 1);
   assert.ok(!f.blooms.includes(oldest));
 });
 
@@ -243,15 +260,14 @@ test('ink: the preview can ask for any kind, and is told when there is no room',
   assert.strictEqual(new Set(f.blooms.map(b => b.zone)).size, f.blooms.length);
 });
 
-test('ink: paint style defaults lighter, and only knows screen and overlay', () => {
+test('ink: paint defaults to overlay at 62%, and only knows overlay and screen', () => {
   const { Kit, Ink } = loadInk();
   const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
-  assert.strictEqual(f.blend, 'screen');
-  assert.ok(f.gain > 0.5 && f.gain < 1, `default gain ${f.gain}`);
-  f.style({ blend: 'overlay', gain: '1.2' });
-  assert.deepStrictEqual([f.blend, f.gain], ['overlay', 1.2]);
+  assert.deepStrictEqual([f.blend, f.gain], ['overlay', 0.62]);
+  f.style({ blend: 'screen', gain: '1.2' });
+  assert.deepStrictEqual([f.blend, f.gain], ['screen', 1.2]);
   f.style({ blend: 'difference', gain: -3 });
-  assert.deepStrictEqual([f.blend, f.gain], ['screen', 0]);
+  assert.deepStrictEqual([f.blend, f.gain], ['overlay', 0]);
 });
 
 process.exitCode = failures ? 1 : 0;

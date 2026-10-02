@@ -7,7 +7,7 @@
 // moves opposite the deep clockwork; foreground silhouettes move the most.
 const Scene = (() => {
   const A = Mech.Assembly, O = Paint.Overlay;
-  const METER = { cx: 800, cy: 720, tubeH: 210, depth: 0.3 };
+  const METER = { cx: 660, cy: 670, tubeH: 210, depth: 0.3 };
   const P = 42; // parallax travel in design px per unit of depth
 
   function compose() {
@@ -15,7 +15,7 @@ const Scene = (() => {
       // ---- Deep clockwork ----
       new A({ x: 700, y: -330, depth: -0.8, blur: 2.5, res: 0.7, alpha: 0.07, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
         parts: [{ type: 'dial', r: 780, hands: false, track: false, turn: -1 }] }),
-      new O({ kind: 'worldlines', x: 880, y: 1080, width: 1500, height: 200, depth: -0.7, alpha: 0.11, seed: 21, op: 'screen' }),
+      new O({ kind: 'worldlines', x: 750, y: 1035, width: 1500, height: 200, depth: -0.7, alpha: 0.17, seed: 21, op: 'screen' }),
       // The astrolabe: a giant dial whose rings step against each other.
       new A({ x: 2000, y: 560, depth: -0.6, blur: 1.6, res: 0.8, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
         parts: [{ type: 'dial', r: 820, ring24: true }] }),
@@ -60,7 +60,7 @@ const Scene = (() => {
       new O({ kind: 'marks', x: 1900, y: 1250, spread: 300, depth: 0.35, alpha: 0.12, seed: 41 }),
       new A({ x: 2470, y: 1440, depth: 0.9, blur: 0.6, alpha: 1, rx: 0.12, ry: -0.15, seed: 7, drift: 18, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
-        parts: [{ type: 'gear', style: 'solid', pitch: 72, teeth: 40, spokes: 6 }] }),
+        parts: [{ type: 'gear', style: 'solid', pitch: 72, teeth: 40, spokes: 6, edge: 0.65 }] }),
       new A({ x: 2610, y: 20, depth: 0.75, blur: 0.5, alpha: 1, rx: 0.1, ry: 0.15, seed: 8, drift: 14, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
         parts: [{ type: 'gear', style: 'solid', pitch: 62, teeth: 26, spokes: 5 }] }),

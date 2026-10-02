@@ -1,25 +1,32 @@
 'use strict';
-// Living ink. Every minute or so a new element of colour forms on its own: an ink
+// Living ink. Every few seconds a new element of colour forms on its own: an ink
 // blot spreading out from the drops that start it, a patch of grungy texture like a
 // photo laid over in overlay mode, a splash and the drops it threw, or now and then a
-// dry-brush stroke. While it rests it keeps moving faintly (creeping outward, its
-// pigment shifting), then it dissolves while others form. Each element is painted
-// once, a few steps per frame; a frame only masks that painting with a small field
-// of arrival times (when the spreading ink reaches each cell).
+// dry-brush stroke. It never settles: it keeps spreading and thinning, floats as if
+// it lay on water (drifting, turning a little, growing), its pigment keeps flowing,
+// and then it dissolves while others form. Each element is painted once, a few steps
+// per frame; a frame only masks that painting with a small field of arrival times
+// (when the spreading ink reaches each cell) and moves it.
 const Ink = (() => {
   const { TAU, canvas, rng, hash, fbm2, pnoise2, pfbm2, smooth } = Kit;
   const { deform, polyPath, circlePts, gauss } = Paint;
 
-  // Where elements may form (design px): clear of the meter and inside the vignette.
-  // Two sit in front of the clockwork; the rest are far behind it.
+  // Where elements may form (design px): around the meter and inside the vignette.
+  // Three sit in front of the clockwork; the rest are far behind it. Overlay shows most
+  // where something is lit, so zones over the clockwork are picked more often (\`w\`).
   const ZONES = [
-    { x: 2000, y: 330, R: [380, 500], depth: -0.95 },  // upper right, behind the astrolabe
-    { x: 2150, y: 1150, R: [320, 420], depth: -0.9 },  // lower right
-    { x: 700, y: 180, R: [300, 400], depth: -0.95 },   // above the meter
-    { x: 1300, y: 1250, R: [280, 360], depth: -0.85 }, // bottom centre
-    { x: 620, y: 1250, R: [240, 320], depth: -0.8 },   // below the meter
-    { x: 1500, y: 170, R: [220, 300], depth: 0.45 },   // top centre, over the clockwork
-    { x: 2300, y: 720, R: [260, 340], depth: 0.5 },    // right, over the clockwork
+    { x: 2000, y: 330, R: [380, 500], depth: -0.95, w: 1 },     // upper right, behind the astrolabe
+    { x: 2150, y: 1150, R: [320, 420], depth: -0.9, w: 1 },     // lower right
+    { x: 700, y: 170, R: [300, 400], depth: -0.95, w: 0.7 },    // above the meter
+    { x: 1300, y: 1250, R: [280, 360], depth: -0.85, w: 0.8 },  // bottom centre
+    { x: 560, y: 1240, R: [240, 320], depth: -0.8, w: 0.6 },    // below the meter
+    { x: 1640, y: 640, R: [260, 340], depth: -0.7, w: 1 },      // in the astrolabe
+    { x: 1180, y: 360, R: [220, 300], depth: -0.8, w: 0.9 },    // between the meter and the astrolabe
+    { x: 160, y: 520, R: [220, 300], depth: -0.9, w: 0.5 },     // far left
+    { x: 360, y: 930, R: [200, 280], depth: -0.85, w: 0.5 },    // left, under the meter
+    { x: 1500, y: 170, R: [220, 300], depth: 0.45, w: 1 },      // top centre, over the clockwork
+    { x: 2300, y: 720, R: [260, 340], depth: 0.5, w: 1 },       // right, over the clockwork
+    { x: 1820, y: 1300, R: [240, 320], depth: 0.4, w: 1 },      // bottom right, over the clockwork
   ];
   // Light, pastel inks: on near-black they read as luminous paint rather than mud.
   const INKS = {
@@ -41,20 +48,25 @@ const Ink = (() => {
   };
 
   // Kinds of element: how often each appears, its size against its zone, seconds to
-  // form, how far it keeps creeping while it rests (in field time) and how strongly
-  // it is drawn. Blots and grit take their outline from the spreading field and dry
-  // with a rim; splashes and strokes take theirs from their painting.
+  // form, how much further it spreads after forming (in field time), how much it grows
+  // as it floats and how strongly it is drawn. Blots and grit take their outline from
+  // the spreading field and dry with a rim; splashes and strokes take theirs from their
+  // painting, so they only grow.
   const KINDS = {
-    blot: { weight: 0.42, size: [0.45, 0.7], form: [8, 13], creep: [0.06, 0.12], alpha: [0.38, 0.5], field: true },
-    grit: { weight: 0.22, size: [0.45, 0.65], form: [6, 10], creep: [0.04, 0.08], alpha: [0.28, 0.38], field: true },
-    splash: { weight: 0.2, size: [0.5, 0.65], form: [1.2, 2], creep: [0, 0], alpha: [0.3, 0.4] },
-    stroke: { weight: 0.16, size: [0.9, 1], form: [4, 6], creep: [0, 0], alpha: [0.26, 0.34] },
+    blot: { weight: 0.42, size: [0.45, 0.7], form: [8, 13], spread: [0.35, 0.5], grow: [0.04, 0.08], alpha: [0.38, 0.5], field: true },
+    grit: { weight: 0.22, size: [0.45, 0.65], form: [6, 10], spread: [0.25, 0.4], grow: [0.05, 0.09], alpha: [0.28, 0.38], field: true },
+    splash: { weight: 0.2, size: [0.5, 0.65], form: [1.2, 2], spread: [0, 0], grow: [0.08, 0.14], alpha: [0.3, 0.4] },
+    stroke: { weight: 0.16, size: [0.9, 1], form: [4, 6], spread: [0, 0], grow: [0.05, 0.1], alpha: [0.26, 0.34] },
   };
 
-  const MAX = 4;           // elements at once, not counting ones dissolving (a shift may add one)
-  const MIN = 3;           // fewer than this and a new one comes within seconds
-  const GAP = [30, 80];    // seconds between new elements
-  const REST = [100, 260]; // seconds an element rests before it dissolves
+  const MAX = 6;           // elements at once, not counting ones dissolving (a shift may add one)
+  const MIN = 4;           // fewer than this and a new one comes within seconds
+  const GAP = [10, 24];    // seconds between new elements
+  const REST = [50, 110];  // seconds an element lives on, spreading and floating, before it dissolves
+  const FADE = [25, 40];   // seconds it takes to dissolve
+  const DRIFT = [0.35, 0.8];        // how fast it floats, design px per second
+  const SPIN = [0.0003, 0.0008];    // how fast it turns, radians per second
+  const NEAR = 700;        // design px: the same colour never forms closer than this to itself
   const PREP = 0.4;        // seconds to paint an element before it starts to form
   const DRY = 6;           // seconds for the wet sheen to go
   const RES = 0.5;         // sprite resolution relative to the screen
@@ -62,11 +74,11 @@ const Ink = (() => {
   const FRONT = 0.05;      // softness of the spreading edge, in field time
   const EDGE = 0.07;       // softness of the edge once it has dried
   const TINT = 0.3;        // how strongly an element stains the linework under it
-  const SHIMMER = 0.3;     // how much the pigment keeps shifting once formed
-  const GAIN = 0.8;        // overall strength of the ink (the preview can change it)
+  const SHIMMER = 0.4;     // how much the pigment keeps flowing once formed
+  const GAIN = 0.62;       // overall strength of the ink (the preview can change it)
   // Overlay only shows where something is lit, so in that style the ink goes on thick
   // over the clockwork and the glow, and only a thin wash of it stays over the dark.
-  const OVERLAY = { over: 2.5, wash: 0.35 };
+  const OVERLAY = { over: 2.5, wash: 0.45 };
 
   // ---------- Textures shared by every element ----------
 
@@ -184,11 +196,11 @@ const Ink = (() => {
 
   // ---------- Blot and grit: outline from the spreading field ----------
 
-  // A box big enough for the blot to spread into whichever way it runs, the drops
+  // A box big enough for the blot to keep spreading into whichever way it runs, the drops
   // that start it, and how the ink runs: along an axis, in fingers, sometimes downhill.
   function blotPlan(b, r) {
     const asp = 1 + r() * 1.1, ang = r() * Math.PI, ca = Math.cos(ang), sa = Math.sin(ang);
-    const A = b.R * 1.8 * Math.sqrt(asp), B = b.R * 1.8 / Math.sqrt(asp);
+    const A = b.R * 2.1 * Math.sqrt(asp), B = b.R * 2.1 / Math.sqrt(asp);
     const hx = Math.hypot(A * ca, B * sa), hy = Math.hypot(A * sa, B * ca);
     const drops = [];
     for (let d = 0; d < b.drops; d++) {
@@ -550,7 +562,7 @@ const Ink = (() => {
   // thin pigment lifts first.
   function makeField(b, geo, sprite) {
     const { x0, y0, x1, y1 } = geo.box, w = x1 - x0, h = y1 - y0, run = geo.run;
-    const cs = Math.max(5, w / 150, h / 150), gw = Math.ceil(w / cs), gh = Math.ceil(h / cs), N = gw * gh;
+    const cs = Math.max(5, w / 170, h / 170), gw = Math.ceil(w / cs), gh = Math.ceil(h / cs), N = gw * gh;
     const dc = canvas(gw, gh), dg = dc.getContext('2d');
     dg.imageSmoothingQuality = 'high';
     dg.drawImage(sprite, 0, 0, w / cs, h / cs);
@@ -622,38 +634,57 @@ const Ink = (() => {
     };
   }
 
+  // How an element floats, as if the paint lay on water: drifting, turning a little
+  // and growing from the moment it lands.
+  function motion(b, t) {
+    const u = Math.max(0, t - b.born), grown = 1 - Math.exp(-u / 80);
+    return {
+      x: b.vx * u + Math.sin(u / 23 + b.ph) * 6,
+      y: b.vy * u + Math.cos(u / 29 + b.ph) * 4,
+      s: 1 + b.grow * grown,
+      a: b.spin * u,
+    };
+  }
+
   // What the masks need at time t (null when nothing shows). `tau` is how far the
-  // front has got; `band` the wet pigment at a moving front, `rim` the dried tideline,
-  // `core` the fresh drop; `level` the dissolve; (sx, sy) where the shimmer has drifted.
-  const creep = (b, t) => b.creep * (1 - Math.exp(-Math.max(0, t - b.born - b.form) / 90));
+  // front has got (it keeps spreading, ever slower, after the element has formed);
+  // `band` the wet pigment at a moving front, `rim` the dried tideline, `core` the
+  // fresh drop; `level` the dissolve; (sx, sy) and (fx, fy) where the two layers of
+  // flowing pigment have drifted; `glow` thins as the ink spreads. `busy` while it
+  // forms, when its masks change every frame.
   function state(b, t) {
     const [ph, p] = b.phase(t);
     if (ph === 'prep' || ph === 'gone') return null;
+    const field = KINDS[b.kind].field, v = Math.max(0, t - b.born - b.form), wet = Math.exp(-v / 45);
     const st = {
-      tau: 1 + FRONT + creep(b, t), soft: EDGE, band: 0, rim: KINDS[b.kind].field ? 0.9 : 0, core: 0, coreR: 0.1,
-      level: null, sx: t * b.drift[0], sy: t * b.drift[1], fadeIn: 1, glow: 1,
+      tau: 1 + FRONT + b.spread * (1 - wet), soft: EDGE, band: field ? 0.3 * wet : 0, rim: field ? 0.9 : 0,
+      core: 0, coreR: 0.1, level: null,
+      sx: t * b.drift[0], sy: t * b.drift[1], fx: t * b.drift[2], fy: t * b.drift[3],
+      fadeIn: 1, glow: 1 - 0.25 * smooth(0, b.dry + b.rest, v), busy: false, move: motion(b, t),
     };
     if (ph === 'forming') {
       st.tau = (1 + FRONT) * (1 - Math.pow(1 - p, 1.6));
       st.soft = EDGE + (FRONT - EDGE) * (1 - smooth(0.6, 1, p));
-      st.band = 0.9 * Math.pow(1 - p, 0.7);
+      st.band = 0.9 * Math.pow(1 - p, 0.7) + (field ? 0.3 * smooth(0.5, 1, p) : 0);
       st.rim *= smooth(0.3, 1, p);
       st.core = 1.1 * (1 - smooth(0, 0.7, p));
       st.coreR = 0.04 + 0.4 * st.tau;
       st.fadeIn = smooth(0, 0.04, p);
       st.glow = 1.2 * st.fadeIn;
+      st.busy = true;
     } else if (ph === 'drying') {
-      st.glow = 1 + 0.2 * (1 - smooth(0, 1, p));        // wet paint dries lighter
+      st.glow *= 1 + 0.2 * (1 - smooth(0, 1, p));       // wet paint dries lighter
     } else if (ph === 'fading') {
       st.level = -0.12 + 1.24 * p;
       st.rim *= 1 - p;
-      st.glow = 1 - 0.3 * p;
+      st.glow *= 1 - 0.3 * p;
     }
     return st;
   }
 
-  // This frame's masks: what shows (front, dissolve, shimmer) and the extra pigment
-  // at fronts, rims and fresh drops.
+  // This frame's masks: what shows (front, dissolve, two layers of flowing pigment, one
+  // broad and one finer, drifting different ways) and the extra pigment at fronts,
+  // rims and fresh drops.
   function masks(f, st) {
     const m = f.mImg.data, o = f.bImg.data, T = f.T, D = f.D, step = f.cs / SH_CELL, W = 0.12;
     for (let j = 0, k = 0, i4 = 3; j < f.gh; j++) {
@@ -661,7 +692,7 @@ const Ink = (() => {
         const d = st.tau - T[k];
         let a = smooth(-st.soft, st.soft, d);
         if (a > 0 && st.level != null) a *= smooth(st.level - W, st.level + W, D[k]);
-        if (a > 0) a *= 1 - SHIMMER * shimmer(i * step + st.sx, j * step + st.sy);
+        if (a > 0) a *= 1 - SHIMMER * (0.6 * shimmer(i * step + st.sx, j * step + st.sy) + 0.4 * shimmer(i * step * 2.6 + st.fx, j * step * 2.6 + st.fy));
         m[i4] = a * 255;
         const extra = st.band * Math.exp(-d * d / 0.004) + st.rim * Math.exp(-((d - 0.06) ** 2) / 0.0018) + st.core * Math.exp(-T[k] / st.coreR);
         o[i4] = Math.min(1, a * extra) * 255;
@@ -727,14 +758,17 @@ const Ink = (() => {
       this.next = null;
       this.lastKind = null;
       this.S = 0;
+      this.tick = 0;
+      this.count = 0;
       this.style(o);
     }
 
-    // How the ink meets the scene. 'screen' lays it over the dark as luminous paint;
-    // 'overlay' only colours what is lit (the clockwork, the glow), like a texture laid
-    // over a key visual in overlay mode. `gain` scales its strength.
-    style({ blend = 'screen', gain = GAIN } = {}) {
-      this.blend = blend === 'overlay' ? 'overlay' : 'screen';
+    // How the ink meets the scene. 'overlay' (the default) mostly colours what is lit
+    // (the clockwork, the glow), like a texture laid over a key visual in overlay mode,
+    // with a thin wash over the dark; 'screen' lays it over the dark as luminous paint.
+    // `gain` scales its strength.
+    style({ blend = 'overlay', gain = GAIN } = {}) {
+      this.blend = blend === 'screen' ? 'screen' : 'overlay';
       this.gain = Math.max(0, Number(gain) || 0);
     }
 
@@ -746,23 +780,33 @@ const Ink = (() => {
       return kinds[kinds.length - 1];
     }
 
-    // A new element in a free zone, in a colour no living element is using.
+    // A colour that no living element uses within NEAR of (x, y), or null.
+    pickHue(x, y) {
+      const free = HUES.filter(h => this.blooms.every(b => b.color !== h || Math.hypot(b.x - x, b.y - y) >= NEAR));
+      return free.length ? free[Math.floor(this.random() * free.length)] : null;
+    }
+
+    // A new element in a free zone, in a colour not used close by, floating its own way.
     spawn(t, kind = this.pickKind()) {
       const r = this.random;
       const zones = ZONES.map((_, i) => i).filter(i => !this.blooms.some(b => b.zone === i));
-      const hues = HUES.filter(h => !this.blooms.some(b => b.color === h));
-      if (!zones.length || !hues.length) return null;
-      const zone = zones[Math.floor(r() * zones.length)], z = ZONES[zone], K = KINDS[kind];
-      const color = hues[Math.floor(r() * hues.length)], friends = BLEED[color];
-      const span = ([a, c]) => a + r() * (c - a);
+      if (!zones.length) return null;
+      let u = r() * zones.reduce((s, i) => s + ZONES[i].w, 0), zone = zones[zones.length - 1];
+      for (const i of zones) if ((u -= ZONES[i].w) <= 0) { zone = i; break; }
+      const z = ZONES[zone], K = KINDS[kind];
+      const x = z.x + (r() - 0.5) * 320, y = z.y + (r() - 0.5) * 240, color = this.pickHue(x, y);
+      if (!color) return null;
+      const friends = BLEED[color], span = ([a, c]) => a + r() * (c - a);
+      const dir = r() * TAU, speed = span(DRIFT);
       const b = new Bloom({
-        zone, kind, depth: z.depth, color, color2: friends[Math.floor(r() * friends.length)],
-        x: z.x + (r() - 0.5) * 160, y: z.y + (r() - 0.5) * 120,
+        zone, kind, depth: z.depth, color, color2: friends[Math.floor(r() * friends.length)], x, y,
         R: span(z.R) * span(K.size), angle: (r() < 0.5 ? -1 : 1) * (0.2 + r() * 0.8),
         bulges: Math.floor(r() * 3), drops: 1 + Math.floor(r() * 3),
-        alpha: 0, creep: span(K.creep), drift: [(r() - 0.5) * 0.5, (r() - 0.5) * 0.5],
-        seed: Math.floor(r() * 1e9),
-        born: t + PREP, form: span(K.form), dry: DRY, rest: span(this.restRange), fade: 18 + r() * 12,
+        alpha: 0, spread: span(K.spread), grow: span(K.grow),
+        vx: Math.cos(dir) * speed, vy: Math.sin(dir) * speed * 0.8, spin: (r() < 0.5 ? -1 : 1) * span(SPIN), ph: r() * TAU,
+        drift: [(r() - 0.5) * 0.5, (r() - 0.5) * 0.5, (r() - 0.5) * 0.9, (r() - 0.5) * 0.9],
+        seed: Math.floor(r() * 1e9), slot: this.count++ % 3,
+        born: t + PREP, form: span(K.form), dry: DRY, rest: span(this.restRange), fade: span(FADE),
         cam: { x: this.target.x, y: this.target.y },
       });
       // Big elements are thinner, so none of them takes over the frame.
@@ -772,15 +816,16 @@ const Ink = (() => {
       return b;
     }
 
-    // Start with three dry elements part-way through their rest; a fourth forms soon.
+    // Start with MIN dry elements part-way through their lives; another forms soon.
     boot(t) {
       const r = this.random;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < MIN; i++) {
         const b = this.spawn(t);
-        b.born = t - b.form - b.dry - b.rest * (0.1 + r() * 0.6);
+        if (!b) continue;
+        b.born = t - b.form - b.dry - b.rest * (0.05 + r() * 0.9);
         if (this.S) this.finish(b);
       }
-      this.next = t + 3 + r() * 3;
+      this.next = t + 2 + r() * 3;
     }
 
     // A worldline shift throws a splash (the preview may ask for any kind), and the
@@ -803,7 +848,7 @@ const Ink = (() => {
       if (this.next == null) this.boot(t);
       this.blooms = this.blooms.filter(b => t < b.end);
       const active = this.active(t);
-      if (active < MIN && this.next > t + 12) this.next = t + 4 + this.random() * 8;
+      if (active < MIN && this.next > t + 6) this.next = t + 2 + this.random() * 4;
       if (t >= this.next) {
         if (active < MAX) this.spawn(t);
         this.next = t + GAP[0] + this.random() * (GAP[1] - GAP[0]);
@@ -835,11 +880,13 @@ const Ink = (() => {
       for (const b of this.blooms) { b.sp = b.live = null; b.job = null; this.finish(b); }
     }
 
-    // Mask this frame's image of every element once, for both passes.
+    // Mask this frame's image of every element once, for every pass. Once formed, an
+    // element changes slowly, so its masks are redone every third frame, in turns.
     frame(t) {
+      this.tick = (this.tick + 1) % 3;
       for (const b of this.blooms) {
         b.now = b.sp ? state(b, t) : null;
-        if (!b.now) continue;
+        if (!b.now || (b.live && !b.now.busy && (this.tick + b.slot) % 3)) continue;
         masks(b.field, b.now);
         const live = b.live || {};
         b.live = { reveal: through(b, b.field.mask, live.reveal), boost: through(b, b.field.boost, live.boost) };
@@ -864,15 +911,15 @@ const Ink = (() => {
     // One pass of every picked element, `k` times its own strength.
     lay(ctx, view, t, pick, op, k) {
       const P = 42, S = view.S;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = op;
       for (const b of this.blooms) {
-        if (!b.now || !pick(b)) continue;
-        const a1 = hash(b.seed, 1) * TAU, a2 = hash(b.seed, 2) * TAU;
-        const dx = Math.sin(t / 89 + a1) * 8 - b.cam.x * P * b.depth;
-        const dy = Math.cos(t / 107 + a2) * 5.6 - b.cam.y * P * b.depth * 0.7;
-        const box = [view.ox + (b.x + b.sp.x0 + dx) * S, view.oy + (b.y + b.sp.y0 + dy) * S, b.sp.w * S, b.sp.h * S];
-        const breathe = 1 + 0.06 * Math.sin(t / 41 + a1);
+        if (!b.now || !b.live || !pick(b)) continue;
+        // Float it about its own origin, then add the parallax.
+        const m = b.now.move, c = Math.cos(m.a) * m.s * S, s = Math.sin(m.a) * m.s * S;
+        const x = b.x + m.x - b.cam.x * P * b.depth, y = b.y + m.y - b.cam.y * P * b.depth * 0.7;
+        ctx.setTransform(c, s, -s, c, view.ox + x * S, view.oy + y * S);
+        const box = [b.sp.x0, b.sp.y0, b.sp.w, b.sp.h];
+        const breathe = 1 + 0.06 * Math.sin(t / 41 + b.ph);
         ctx.globalAlpha = Math.min(1, (op === 'color' ? TINT : b.alpha) * k * b.now.glow * breathe);
         ctx.drawImage(b.live.reveal, ...box);
         if (op !== 'color') {
@@ -880,10 +927,11 @@ const Ink = (() => {
           ctx.drawImage(b.live.boost, ...box);
         }
       }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     }
   }
 
-  return { Field, ZONES, KINDS, INKS, MAX };
+  return { Field, ZONES, KINDS, INKS, MAX, NEAR, state };
 })();

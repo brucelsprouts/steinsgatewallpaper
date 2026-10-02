@@ -30,8 +30,9 @@
   });
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
   const controller = new Display.Controller(meter, clock);
-  const smoke = new Atmos.Smoke(), light = new Atmos.Light();
+  const smoke = new Atmos.Smoke(), light = new Atmos.Light(Kit.rng(seed + 7)), lens = new Atmos.LensDust();
   smoke.cam = light.cam = scene.dust.cam; // they drift with the near air
+  scene.dust.beam = (x, y, t) => light.beamAt(x, y, t); // dust glints in the light shafts
   // Clocks spin on every shift and click; a real worldline shift also throws fresh ink
   // and a burst of leaked light.
   controller.onShift = (t, worldline) => {
@@ -41,7 +42,7 @@
   if (q.get('worldline')) controller.worldline = q.get('worldline'); // debug: pin the boot worldline
   if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.settle(); }
 
-  let view, vignette, grunge, grain, lensDust;
+  let view, vignette, grunge, grain;
 
   function buildSprites() {
     meter.build(view.S, theme());
@@ -50,7 +51,7 @@
     smoke.build(view, hot);
     light.build(view);
     grunge = Atmos.grunge(view);
-    lensDust = Atmos.lensDust(view);
+    lens.build();
     grain = Atmos.grain(view, { ...hot, rx: 560, ry: 230 });
     // Vignette at quarter resolution with an eased falloff.
     const k = 0.25, W = view.W, H = view.H;
@@ -89,18 +90,16 @@
     const m = scene.meterOffset(t);
     meter.draw(ctx, { ...view, ox: view.ox + m.x * view.S, oy: view.oy + m.y * view.S }, t);
     scene.drawFront(ctx, view, t, now);
-    // Light pooling on the clockwork and a haze of smoke, then the textured border and
-    // the vignette. Over those, as if on the film and the lens: light leaks, dust and
-    // grain (which also hides 8-bit banding in the dark gradients).
+    // Light pooling on the clockwork, shafts of light and a haze of smoke, then the
+    // textured border and the vignette. Over those, as if on the film and the lens:
+    // light leaks, dust and grain (which also hides 8-bit banding in the dark gradients).
     light.draw(ctx, view, t, 'hot');
+    light.draw(ctx, view, t, 'rays');
     smoke.draw(ctx, view, t);
     ctx.drawImage(grunge, 0, 0, view.W, view.H);
     ctx.drawImage(vignette, 0, 0, view.W, view.H);
     light.draw(ctx, view, t, 'leak');
-    ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = 0.35;
-    ctx.drawImage(lensDust, 0, 0, view.W, view.H);
-    ctx.globalAlpha = 1;
+    lens.draw(ctx, view, t);
     ctx.globalCompositeOperation = 'difference';
     ctx.drawImage(grain, 0, 0, view.W, view.H);
     ctx.globalCompositeOperation = 'source-over';
@@ -112,6 +111,7 @@
     controller.tick(t);
     meter.update(t);
     scene.update(t);
+    light.update(t);
   }
 
   // ---------- Loop: capped frame rate, fully stopped while paused or hidden ----------
@@ -171,13 +171,15 @@
   }
 
   // Console helpers: SG.shift() triggers a worldline shift, SG.ink() brings fresh ink
-  // (SG.ink('blot') a given kind). The rest drive recordings and tools/preview.html.
+  // (SG.ink('blot') a given kind), SG.leak() a light leak. The rest drive recordings
+  // and tools/preview.html.
   let simLast = 0;
   const simNow = () => (manual ? simLast : elapsed());
   window.SG = {
     config: Config,
     shift: () => controller.shift(simNow()),
     ink: kind => scene.ink.shift(simNow(), kind)?.kind ?? null,
+    leak: () => light.add(simNow(), 0, 3).edge,
     click: () => controller.click(simNow()),
     pointer: (x, y) => scene.pointer(x, y),
     speed(s) { if (s > 0) { base = elapsed(); mark = performance.now(); speed = s; } },

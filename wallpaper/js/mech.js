@@ -208,6 +208,9 @@ const Mech = (() => {
     const solid = o.style === 'solid';
     const lw = o.lw ?? Math.max(1, G.r * 0.008);
     g.lineJoin = 'round';
+    // How much light a solid gear's edges catch (`edge` dims them for a gear that
+    // would otherwise stand out).
+    const e = o.edge ?? 1;
     if (solid) {
       // Dark turned metal: a faint sheen toward the rim, concentric turning marks, and
       // chamfered edges that catch a little light. All of it looks the same at any
@@ -215,7 +218,7 @@ const Mech = (() => {
       const fg = g.createRadialGradient(0, 0, G.r * 0.1, 0, 0, G.r);
       fg.addColorStop(0, `rgb(${pal.solid})`);
       fg.addColorStop(0.75, `rgb(${pal.solid})`);
-      fg.addColorStop(1, `rgba(${pal.rim},0.16)`);
+      fg.addColorStop(1, `rgba(${pal.rim},${0.16 * e})`);
       g.fillStyle = `rgb(${pal.solid})`;
       g.fill(p, 'evenodd');
       g.fillStyle = fg;
@@ -228,10 +231,10 @@ const Mech = (() => {
         ring(g, G.r * (0.17 + k * 0.018), Math.max(0.6, G.r * 0.002));
       }
       g.restore();
-      g.strokeStyle = `rgba(${pal.rim},0.6)`;
+      g.strokeStyle = `rgba(${pal.rim},${0.6 * e})`;
       g.lineWidth = Math.max(1.2, G.r * 0.006);
       g.stroke(p);
-      g.strokeStyle = `rgba(${pal.rim},0.16)`;
+      g.strokeStyle = `rgba(${pal.rim},${0.16 * e})`;
       g.lineWidth = Math.max(2, G.r * 0.02);
       g.stroke(p);
     } else {
@@ -246,7 +249,7 @@ const Mech = (() => {
       g.stroke(p);
     }
     // Machined details: rim band, hub collar, screws.
-    g.strokeStyle = solid ? `rgba(${pal.rim},0.35)` : `rgba(${pal.line},0.7)`;
+    g.strokeStyle = solid ? `rgba(${pal.rim},${0.35 * e})` : `rgba(${pal.line},0.7)`;
     if (G.r > 40 && (o.spokes ?? 5) > 0) ring(g, G.root - G.r * 0.04, lw * 0.6);
     ring(g, G.r * 0.15, lw * 0.7);
     if (G.r > 60) {

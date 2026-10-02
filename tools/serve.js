@@ -1,7 +1,7 @@
 // Minimal static server for previewing the wallpaper: node tools/serve.js [port]
 const http = require('http'), fs = require('fs'), path = require('path');
 const root = path.join(__dirname, '..');
-const port = Number(process.argv[2]) || 5173;
+const port = Number(process.argv[2]) || Number(process.env.PORT) || 5173;
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.css': 'text/css' };
 http.createServer((req, res) => {
   // POST /frame/<clip>/<n>.jpg stores a recorded frame under shots/frames/<clip>/.
