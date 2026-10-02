@@ -261,12 +261,39 @@ const Nixie = (() => {
 
     fr.plinth = sprite(total, h * 1.3, w, S, g => {
       if (!opts.plinth) return;
+      // Dark walnut block: a thin top face catching the light, then the front face.
+      const tf = h * 0.03, shape = new Path2D();
+      shape.roundRect(px, py, pw, ph, h * 0.012);
       const pg = g.createLinearGradient(0, py, 0, py + ph);
-      pg.addColorStop(0, '#16110d');
-      pg.addColorStop(0.1, '#0e0b09');
-      pg.addColorStop(1, '#070605');
+      pg.addColorStop(0, '#2b1d13');
+      pg.addColorStop(tf / ph, '#24180f');
+      pg.addColorStop(tf / ph + 0.01, '#170f09');
+      pg.addColorStop(1, '#0a0705');
       g.fillStyle = pg;
-      g.beginPath(); g.roundRect(px, py, pw, ph, h * 0.012); g.fill();
+      g.fill(shape);
+      g.save();
+      g.clip(shape);
+      // Grain: long wavy fibres, alternately lighter and darker, never strong.
+      const rows = 34;
+      for (let k = 0; k < rows; k++) {
+        const y0 = py + (k + Kit.hash(k, 5)) / rows * ph;
+        const light = Kit.hash(k, 6) < 0.45;
+        g.strokeStyle = light ? `rgba(150,104,66,${0.05 + 0.06 * Kit.hash(k, 7)})` : `rgba(0,0,0,${0.18 + 0.2 * Kit.hash(k, 8)})`;
+        g.lineWidth = Math.max(0.5, h * (0.0025 + 0.004 * Kit.hash(k, 9)));
+        g.beginPath();
+        for (let x = px; x <= px + pw; x += 6) {
+          const u = (x - px) / pw;
+          const y = y0 + (Kit.noise(u * 7 + k * 3.1, 40 + k) - 0.5) * ph * 0.12 + Math.sin(u * 3 + k) * ph * 0.02;
+          x === px ? g.moveTo(x, y) : g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+      // Bevel where the top face meets the front.
+      g.fillStyle = 'rgba(190,140,96,0.10)';
+      g.fillRect(px, py + tf, pw, Math.max(0.6, h * 0.003));
+      g.fillStyle = 'rgba(0,0,0,0.35)';
+      g.fillRect(px, py + ph - h * 0.01, pw, h * 0.01);
+      g.restore();
     });
 
     fr.plinthLit = sprite(total, h * 1.3, w, S, g => {
@@ -304,7 +331,10 @@ const Nixie = (() => {
 
     const R = total * 0.85;
     fr.haze = sprite(total, h, R, S, g => {
-      const cx = total / 2, cy = h / 2;
+      const cx = total / 2, cy = h * 0.4;
+      g.translate(cx, cy);
+      g.scale(1, 0.8);
+      g.translate(-cx, -cy);
       const hz = g.createRadialGradient(cx, cy, 0, cx, cy, R);
       hz.addColorStop(0, `rgba(${th.glow},0.05)`);
       hz.addColorStop(0.5, `rgba(${th.glow},0.018)`);
@@ -409,7 +439,9 @@ const Nixie = (() => {
       const put = (sp, x, y, a = 1) => {
         if (a <= 0.002) return;
         ctx.globalAlpha = Math.min(1, a);
-        const dx = Math.round(ox + (x + sp.ox) * S), dy = Math.round(oy + (y + sp.oy) * S);
+        // No per-sprite rounding: every part shares one sub-pixel offset, so the meter
+        // moves as a single rigid object.
+        const dx = ox + (x + sp.ox) * S, dy = oy + (y + sp.oy) * S;
         if (sp.res === 1) ctx.drawImage(sp.c, dx, dy);
         else ctx.drawImage(sp.c, dx, dy, sp.c.width / sp.res, sp.c.height / sp.res);
       };

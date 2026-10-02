@@ -38,6 +38,20 @@ const Kit = (() => {
     return a + (b - a) * u;
   }
 
+  // Smooth 2D value noise in [0, 1), and a few octaves of it.
+  function noise2(x, y, seed = 0) {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    const h = (a, b) => hash(a * 374761393 + b * 668265263, seed);
+    const a = h(ix, iy), b = h(ix + 1, iy), c = h(ix, iy + 1), d = h(ix + 1, iy + 1);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  }
+  function fbm2(x, y, seed = 0, octaves = 4) {
+    let v = 0, amp = 0.5, f = 1, norm = 0;
+    for (let o = 0; o < octaves; o++) { v += amp * noise2(x * f, y * f, seed + o * 17); norm += amp; amp *= 0.5; f *= 2.03; }
+    return v / norm;
+  }
+
   const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
   const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
   const ease = {
@@ -51,5 +65,5 @@ const Kit = (() => {
     },
   };
 
-  return { TAU, canvas, hash, rng, noise, clamp, smooth, ease };
+  return { TAU, canvas, hash, rng, noise, noise2, fbm2, clamp, smooth, ease };
 })();

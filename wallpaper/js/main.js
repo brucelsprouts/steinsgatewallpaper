@@ -8,7 +8,8 @@
 
   // Debug hooks (not settings): ?now=2026-10-02T09:59:55 fakes the wall clock,
   // ?still=3.2 renders a single frame that many seconds after boot, ?shiftAt=5 fires
-  // a worldline shift then, ?cursor=0.8,-0.4 pins the parallax camera.
+  // a worldline shift then, ?cursor=0.8,-0.4 pins the parallax camera, ?worldline=1.048596
+  // pins the starting worldline.
   const fakeNow = q.get('now') ? new Date(q.get('now')).getTime() : null;
   const still = q.has('still') ? Number(q.get('still')) : null;
   const shiftAt = q.has('shiftAt') ? Number(q.get('shiftAt')) : null;
@@ -22,13 +23,16 @@
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
   const controller = new Display.Controller(meter, clock);
   controller.onShift = t => scene.shifts.push(t);
+  if (q.get('worldline')) controller.worldline = q.get('worldline'); // debug: pin the boot worldline
   if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.settle(); }
 
-  let view, vignette, dither;
+  let view, vignette, dither, grunge, scratches;
 
   function buildSprites() {
     meter.build(view.S, theme());
     scene.build(view.S, view, theme());
+    grunge = Atmos.grunge(view);
+    scratches = Atmos.scratches(view);
     // Vignette at quarter resolution with an eased falloff; dither hides 8-bit banding.
     const k = 0.25, W = view.W, H = view.H;
     vignette = Kit.canvas(W * k, H * k);
@@ -82,7 +86,12 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+    // Textured border, then the smooth vignette, then scratches "on the glass".
+    ctx.drawImage(grunge, 0, 0, view.W, view.H);
     ctx.drawImage(vignette, 0, 0, view.W, view.H);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.22;
+    ctx.drawImage(scratches, 0, 0);
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.016;
     ctx.fillStyle = dither;

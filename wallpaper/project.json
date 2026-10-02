@@ -1,0 +1,41 @@
+{
+  "contentrating": "Everyone",
+  "description": "A divergence meter: nixie tubes among slowly turning clockwork and paint. Shows the time, the date or a worldline. Move the mouse for parallax; click to shift.",
+  "file": "index.html",
+  "general": {
+    "properties": {
+      "display": {
+        "order": 100,
+        "text": "Display",
+        "type": "combo",
+        "value": "time",
+        "options": [
+          { "label": "Time", "value": "time" },
+          { "label": "Date", "value": "date" },
+          { "label": "Worldline", "value": "worldline" }
+        ]
+      },
+      "glow": {
+        "order": 101,
+        "text": "Glow colour",
+        "type": "combo",
+        "value": "orange",
+        "options": [
+          { "label": "Orange", "value": "orange" },
+          { "label": "White", "value": "white" }
+        ]
+      },
+      "shift": {
+        "order": 102,
+        "text": "Worldline shifts",
+        "type": "bool",
+        "value": true
+      }
+    }
+  },
+  "preview": "preview.jpg",
+  "tags": ["Anime"],
+  "title": "Divergence Meter",
+  "type": "web",
+  "visibility": "private"
+}

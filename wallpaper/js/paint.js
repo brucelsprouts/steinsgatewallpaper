@@ -1,7 +1,7 @@
 'use strict';
-// Painted overlays in the spirit of mixed-media anime illustration: white paint
-// splatter with drips, watercolour blooms, dry-brush strokes, pen scratches, and a
-// faint worldline (attractor field) diagram. All procedural and seeded, baked once.
+// Painted overlays in the spirit of mixed-media anime illustration: thrown paint
+// splats and flicks, watercolour washes, pen scratches, drafting marks, and a faint
+// worldline (attractor field) diagram. All procedural and seeded, baked once.
 const Paint = (() => {
   const { TAU, canvas, rng } = Kit;
 
@@ -61,51 +61,115 @@ const Paint = (() => {
     g.restore();
   }
 
-  // Paint splatter: a fractal-edged core, short fingers ending in bulbs, droplets
-  // thrown along the fingers, fine mist, and optional drips.
-  function splatter(g, R, seed, o = {}) {
-    const r = rng(seed);
-    const r0 = R * (o.core ?? 0.22);
-    g.fillStyle = `rgb(${o.color || COLORS.white})`;
-    g.fill(polyPath(deform(circlePts(14, r0, r, [0.6, 1.4]), 4, 0.13, r)));
-    const fingers = [];
-    for (let k = 0; k < (o.spikes ?? 22); k++) {
-      const a = r() * TAU;
-      const len = r0 * (0.12 + Math.pow(r(), 2.2) * (o.reach ?? 1.1));
-      const w = r0 * (0.045 + r() * 0.07);
-      fingers.push(a);
-      const ca = Math.cos(a), sa = Math.sin(a), nx = -sa, ny = ca;
-      const b0 = r0 * 0.8, b1 = r0 * 0.8 + len, bm = b0 + len * 0.55;
-      const neck = w * (0.25 + r() * 0.2);
-      g.beginPath();
-      g.moveTo(ca * b0 + nx * w, sa * b0 + ny * w);
-      g.quadraticCurveTo(ca * bm + nx * neck * 1.2, sa * bm + ny * neck * 1.2, ca * b1 + nx * neck, sa * b1 + ny * neck);
-      g.lineTo(ca * b1 - nx * neck, sa * b1 - ny * neck);
-      g.quadraticCurveTo(ca * bm - nx * neck * 1.2, sa * bm - ny * neck * 1.2, ca * b0 - nx * w, sa * b0 - ny * w);
-      g.closePath();
-      g.fill();
-      // Bulb at the tip; sometimes it has already broken free.
-      const free = r() < 0.35 ? len * (0.15 + r() * 0.4) : 0;
-      g.beginPath(); g.arc(ca * (b1 + free), sa * (b1 + free), neck * (1.6 + r() * 0.9), 0, TAU); g.fill();
+  // Uneven pigment: fractal noise knocks the paint back in blotches, as if it pooled
+  // in places and thinned in others. `scale` sets blotch size (higher = finer).
+  function mottle(g, hw, hh, seed, strength, scale = 1) {
+    const n = 96, c = canvas(n, n), cg = c.getContext('2d'), img = cg.createImageData(n, n);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const v = Kit.fbm2(x / n * 4 * scale, y / n * 4 * scale, seed, 4);
+        img.data[(y * n + x) * 4 + 3] = Kit.smooth(0.32, 0.72, v) * 255;
+      }
     }
-    // Droplets: mostly flung along the fingers, smaller and more stretched further out.
-    for (let k = 0; k < (o.drops ?? 70); k++) {
-      const a = r() < 0.65 ? fingers[Math.floor(r() * fingers.length)] + gauss(r) * 0.12 : r() * TAU;
-      const f = Math.pow(r(), 1.5);
-      const d = r0 * (1.3 + f * (o.spread ?? 3));
-      const sz = Math.max(0.6, r0 * 0.075 * Math.pow(r(), 1.8) * (1.1 - f * 0.7));
-      const e = 1 + f * 1.8 * r();
-      g.beginPath(); g.ellipse(Math.cos(a) * d, Math.sin(a) * d, sz * e, sz, a, 0, TAU); g.fill();
+    cg.putImageData(img, 0, 0);
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+    g.globalAlpha = strength;
+    g.drawImage(c, -hw, -hh, hw * 2, hh * 2);
+    g.restore();
+  }
+
+  // A droplet in flight: round when slow, a teardrop with a tail when fast.
+  function tadpole(g, x, y, a, s, e) {
+    g.save();
+    g.translate(x, y);
+    g.rotate(a);
+    g.beginPath(); g.ellipse(0, 0, s * e, s, 0, 0, TAU); g.fill();
+    if (e > 1.35) {
+      g.beginPath();
+      g.moveTo(-s * e * 0.5, -s * 0.55);
+      g.quadraticCurveTo(-s * e * 1.6, -s * 0.1, -s * e * 2.3, 0);
+      g.quadraticCurveTo(-s * e * 1.6, s * 0.1, -s * e * 0.5, s * 0.55);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // Tapered finger of paint leaving the core along angle a, with a bulb at the tip.
+  function finger(g, a, base, len, w, r) {
+    const ca = Math.cos(a), sa = Math.sin(a), nx = -sa, ny = ca;
+    const b1 = base + len, bm = base + len * 0.55, neck = w * (0.25 + r() * 0.2);
+    g.beginPath();
+    g.moveTo(ca * base + nx * w, sa * base + ny * w);
+    g.quadraticCurveTo(ca * bm + nx * neck * 1.2, sa * bm + ny * neck * 1.2, ca * b1 + nx * neck, sa * b1 + ny * neck);
+    g.lineTo(ca * b1 - nx * neck, sa * b1 - ny * neck);
+    g.quadraticCurveTo(ca * bm - nx * neck * 1.2, sa * bm - ny * neck * 1.2, ca * base - nx * w, sa * base - ny * w);
+    g.closePath();
+    g.fill();
+    const free = r() < 0.35 ? len * (0.15 + r() * 0.4) : 0;
+    g.beginPath(); g.arc(ca * (b1 + free), sa * (b1 + free), neck * (1.6 + r() * 0.9), 0, TAU); g.fill();
+  }
+
+  // Thrown paint: the splash keeps its momentum. The core stretches along `dir`,
+  // fingers and beaded spray streaks shoot forward, droplets fly ahead in a cone
+  // and trail tails back toward the impact; drips still run straight down.
+  function splat(g, R, seed, o = {}) {
+    const r = rng(seed);
+    const dir = o.dir ?? r() * TAU, sp = o.speed ?? 0.6;
+    const r0 = R * (o.core ?? 0.17);
+    const stretch = 1 + sp * 0.9, squash = 1 - sp * 0.2;
+    const cx = -Math.cos(dir) * R * 0.3 * sp, cy = -Math.sin(dir) * R * 0.3 * sp;
+    g.fillStyle = `rgb(${o.color || COLORS.white})`;
+    g.strokeStyle = g.fillStyle;
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(dir);
+    // In this frame the paint travels toward +x.
+    g.save();
+    g.scale(stretch, squash);
+    g.fill(polyPath(deform(circlePts(14, r0, r, [0.6, 1.4]), 4, 0.14, r)));
+    g.restore();
+    const edge = a => r0 * 0.85 / Math.hypot(Math.cos(a) / stretch, Math.sin(a) / squash);
+    for (let k = 0; k < (o.spikes ?? 18); k++) {
+      const fwd = r() < 0.8;
+      const a = fwd ? gauss(r) * (0.95 - sp * 0.45) : Math.PI + gauss(r) * 0.8;
+      const reach = fwd ? Math.max(0.35, Math.cos(a)) : 0.35;
+      finger(g, a, edge(a), r0 * (0.2 + Math.pow(r(), 1.6) * (0.8 + sp * 1.8)) * reach, r0 * (0.05 + r() * 0.08) * (fwd ? 1 : 0.7), r);
+    }
+    // Spray streaks, breaking into beads as they thin out.
+    g.lineCap = 'round';
+    for (let k = 0; k < (o.streaks ?? 7); k++) {
+      const a = gauss(r) * 0.3 * (1.2 - sp * 0.5), ca = Math.cos(a), sa = Math.sin(a);
+      const start = edge(a) + r0 * 0.1, L = r0 * (1.6 + r() * 2.6) * (0.6 + sp);
+      let d = start, w = r0 * (0.035 + r() * 0.03);
+      while (d < start + L && w > 0.45) {
+        const seg = r0 * (0.15 + r() * 0.5);
+        g.lineWidth = w;
+        g.beginPath(); g.moveTo(ca * d, sa * d); g.lineTo(ca * (d + seg), sa * (d + seg)); g.stroke();
+        d += seg + r0 * (0.05 + r() * 0.25) * ((d - start) / L + 0.2);
+        w *= 0.8;
+      }
+      tadpole(g, ca * (d + r0 * 0.2), sa * (d + r0 * 0.2), a, Math.max(0.6, w * 1.2), 1.8);
+    }
+    for (let k = 0; k < (o.drops ?? 60); k++) {
+      const ahead = r() < 0.85;
+      const a = ahead ? gauss(r) * (0.35 + (1 - sp) * 0.6) : Math.PI + gauss(r) * 0.9;
+      const f = Math.pow(r(), 1.3);
+      const d = edge(a) + r0 * (0.4 + f * (ahead ? 2.6 + sp * 2.2 : 1.0));
+      const sz = Math.max(0.6, r0 * 0.08 * Math.pow(r(), 1.7) * (1.1 - f * 0.6));
+      tadpole(g, Math.cos(a) * d, Math.sin(a) * d, a, sz, 1 + f * 1.8 * sp);
     }
     g.save();
-    g.globalAlpha = 0.55;
-    for (let k = 0; k < (o.mist ?? 220); k++) {
-      const a = r() * TAU, d = r0 * (1.1 + Math.pow(r(), 0.7) * 4), sz = 0.35 + r() * 1.1;
+    g.globalAlpha = 0.5;
+    for (let k = 0; k < (o.mist ?? 200); k++) {
+      const a = gauss(r) * 1.1, d = r0 * (1 + Math.pow(r(), 0.6) * 5), sz = 0.35 + r() * 1.0;
       g.beginPath(); g.arc(Math.cos(a) * d, Math.sin(a) * d, sz, 0, TAU); g.fill();
     }
     g.restore();
+    g.restore();
+    // Drips obey gravity whatever the throw direction.
     for (let k = 0; k < (o.drips ?? 0); k++) {
-      const x = (r() - 0.5) * r0 * 1.2, y0 = r0 * 0.6, len = r0 * (0.8 + r() * 2.6), w = r0 * (0.035 + r() * 0.04);
+      const x = cx + (r() - 0.5) * r0 * 1.2, y0 = cy + r0 * 0.5, len = r0 * (0.8 + r() * 2.6), w = r0 * (0.035 + r() * 0.04);
       g.beginPath();
       g.moveTo(x - w, y0);
       g.quadraticCurveTo(x - w * 0.55, y0 + len * 0.6, x - w * 0.45, y0 + len);
@@ -115,68 +179,82 @@ const Paint = (() => {
       g.fill();
       g.beginPath(); g.arc(x, y0 + len + w * 0.3, w * 0.8, 0, TAU); g.fill();
     }
-    grain(g, R, r, o.grain ?? 1200, 0.35);
+    mottle(g, R, R, seed * 7 + 1, o.mottle ?? 0.45, 2.2);
+    grain(g, R, r, o.grain ?? 1500, 0.35);
   }
 
-  // Watercolour: dozens of translucent layers, each a fresh deformation of one
-  // fractal base shape, granulated between batches. Edges bleed; the middle pools.
-  function wash(g, R, seed, color, o = {}) {
+  // A flick: paint whipped off a brush, strung along an arc in shrinking beads.
+  function flick(g, R, seed, o = {}) {
     const r = rng(seed);
-    const base = deform(circlePts(10, R * 0.5, r, [0.4, 1.6]), 3, 0.32, r);
-    const layers = o.layers ?? 36;
-    for (let L = 0; L < layers; L++) {
-      g.fillStyle = `rgba(${color},${o.alpha ?? 0.04})`;
-      g.fill(polyPath(deform(base, 3, 0.22, r)));
-      if (L % 6 === 5) grain(g, R * 0.9, r, 400, 0.06, 18);
-    }
-    grain(g, R, r, o.grain ?? 2200, 0.12);
-  }
-
-  // A broad brush sweep: tapered ribbon with ragged edges, dragged dry at the tail.
-  function brush(g, seed, o) {
-    const r = rng(seed);
-    const [p0, p1, p2, p3] = o.path, W = o.width;
+    const rot = o.rot0 ?? r() * TAU, c = Math.cos(rot), s = Math.sin(rot);
+    const P = [[-R * 0.85, R * 0.3], [-R * 0.05, -R * 0.55], [R * 0.85, -R * 0.15]]
+      .map(([x, y]) => [x * c - y * s, x * s + y * c]);
     const at = t => {
       const u = 1 - t;
-      return [
-        u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
-        u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
-      ];
+      return [u * u * P[0][0] + 2 * u * t * P[1][0] + t * t * P[2][0], u * u * P[0][1] + 2 * u * t * P[1][1] + t * t * P[2][1]];
     };
-    const N = 220, left = [], right = [], frames = [];
-    for (let i = 0; i <= N; i++) {
-      const t = i / N, [x, y] = at(t);
-      const [x1, y1] = at(Math.min(1, t + 1 / N)), [x0, y0] = at(Math.max(0, t - 1 / N));
-      const tl = Math.hypot(x1 - x0, y1 - y0) || 1, nx = -(y1 - y0) / tl, ny = (x1 - x0) / tl;
-      const w = W * (0.18 + 0.82 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.1)), 0.55)) * (1 + 0.12 * (Kit.noise(t * 9, 3) - 0.5));
-      const jl = (Kit.noise(t * 60, 1) - 0.5) * W * 0.08, jr = (Kit.noise(t * 60, 2) - 0.5) * W * 0.08;
-      left.push([x + nx * (w / 2 + jl), y + ny * (w / 2 + jl)]);
-      right.push([x - nx * (w / 2 + jr), y - ny * (w / 2 + jr)]);
-      frames.push([x, y, nx, ny, w]);
-    }
     g.fillStyle = `rgb(${o.color || COLORS.white})`;
-    g.fill(polyPath([...left, ...right.reverse()]));
-    // Dry streaks: bristle gaps along the stroke, more of them toward the tail.
-    g.save();
-    g.globalCompositeOperation = 'destination-out';
-    g.lineCap = 'round';
-    for (let k = 0; k < (o.bristles ?? 90); k++) {
-      const off = r() - 0.5, start = r() * 0.9, len = 0.05 + r() * 0.45;
-      g.strokeStyle = `rgba(0,0,0,${0.5 + r() * 0.5})`;
-      g.lineWidth = 0.6 + r() * 2.2;
-      g.beginPath();
-      let first = true;
-      for (let i = Math.floor(start * N); i <= Math.min(N, Math.floor((start + len) * N)); i++) {
-        const [x, y, nx, ny, w] = frames[i];
-        const px = x + nx * off * w, py = y + ny * off * w;
-        if (!first && r() < 0.3 + (i / N) * 0.3) { g.moveTo(px, py); continue; }
-        first ? g.moveTo(px, py) : g.lineTo(px, py);
-        first = false;
+    g.strokeStyle = g.fillStyle;
+    const n = o.drops ?? 46;
+    let prev = null;
+    for (let k = 0; k < n; k++) {
+      const t = Math.min(1, Math.pow((k + r() * 0.6) / n, 0.85));
+      const [x, y] = at(t), [x2, y2] = at(Math.min(1, t + 0.01));
+      const a = Math.atan2(y2 - y, x2 - x), off = gauss(r) * R * 0.03 * (0.3 + t);
+      const px = x - Math.sin(a) * off, py = y + Math.cos(a) * off;
+      const sz = Math.max(0.6, R * 0.045 * (1 - t * 0.8) * (0.4 + r() * 0.9));
+      tadpole(g, px, py, a, sz, 1 + (1 - t) * 1.3 * r());
+      // Fine threads of paint between the heavier beads.
+      if (prev && sz > R * 0.02 && r() < 0.5) {
+        g.globalAlpha = 0.45; g.lineWidth = 0.6;
+        g.beginPath(); g.moveTo(prev[0], prev[1]); g.lineTo(px, py); g.stroke();
+        g.globalAlpha = 1;
       }
-      g.stroke();
+      prev = [px, py];
     }
-    g.restore();
-    grain(g, Math.max(...o.path.map(p => Math.hypot(p[0], p[1]))) + W, r, 3000, 0.25);
+    mottle(g, R, R, seed * 7 + 3, o.mottle ?? 0.35, 2.5);
+    grain(g, R, r, o.grain ?? 600, 0.3);
+  }
+
+  // Watercolour: an elongated, lobed stain built from dozens of translucent layers,
+  // each a fresh deformation of its lobe. Pigment unevenness is knocked in between
+  // layers, then dried edges, backruns and granulation finish it.
+  function wash(g, R, seed, color, o = {}) {
+    const r = rng(seed);
+    const ang = o.angle ?? r() * TAU, asp = o.aspect ?? 1.5 + r() * 0.8;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const lobes = o.lobes ?? 2 + Math.floor(r() * 2);
+    const bases = [];
+    for (let L = 0; L < lobes; L++) {
+      const off = (L - (lobes - 1) / 2) * R * 0.4 * (0.7 + r() * 0.6);
+      const rad = R * (0.3 + r() * 0.12);
+      const pts = circlePts(10, rad, r, [0.4, 1.7]).map(([x, y, v]) => {
+        const X = x * asp * 0.7 + off, Y = y * 0.8 + gauss(r) * R * 0.03;
+        return [X * ca - Y * sa, X * sa + Y * ca, v];
+      });
+      bases.push(deform(pts, 3, 0.3, r));
+    }
+    const layers = o.layers ?? 30;
+    for (let L = 0; L < layers; L++) {
+      g.fillStyle = `rgba(${color},${o.alpha ?? 0.035})`;
+      g.fill(polyPath(deform(bases[L % lobes], 2, 0.25, r)));
+      if (L % 5 === 4) mottle(g, R, R, seed * 7 + L, 0.22, 1.1 + r());
+    }
+    // Dried edges hold more pigment.
+    for (let k = 0; k < lobes + 1; k++) {
+      g.strokeStyle = `rgba(${color},0.12)`;
+      g.lineWidth = 0.8 + r() * 1.2;
+      g.stroke(polyPath(deform(bases[k % lobes], 2, 0.2, r)));
+    }
+    // Backruns: small cauliflower blooms.
+    for (let k = 0; k < (o.blooms ?? 3); k++) {
+      const b = bases[k % lobes], [bx, by] = b[Math.floor(r() * b.length)];
+      const pts = deform(circlePts(8, R * (0.05 + r() * 0.07), r, [0.8, 2]), 3, 0.3, r).map(([x, y, v]) => [x + bx * 0.6, y + by * 0.6, v]);
+      g.strokeStyle = `rgba(${color},0.1)`;
+      g.stroke(polyPath(pts));
+    }
+    grain(g, R, r, o.grain ?? 5000, 0.25, 1.6);
+    mottle(g, R, R, seed * 13, 0.35, 3.5);
   }
 
   // Quick pen scratches: jittery hatching like a sketch left in the margin.
@@ -257,9 +335,9 @@ const Paint = (() => {
   }
 
   const KINDS = {
-    splatter: (g, o) => splatter(g, o.r, o.seed, o),
+    splat: (g, o) => splat(g, o.r, o.seed, o),
+    flick: (g, o) => flick(g, o.r, o.seed, o),
     wash: (g, o) => wash(g, o.r, o.seed, COLORS[o.color] || o.color, o),
-    brush: (g, o) => brush(g, o.seed, o),
     scratches: (g, o) => scratches(g, o.seed, o),
     worldlines: (g, o) => worldlines(g, o.seed, o),
     marks: (g, o) => marks(g, o.seed, o),
@@ -275,10 +353,6 @@ const Paint = (() => {
     // Half-extents of the baked art around its centre, per kind.
     bounds() {
       switch (this.kind) {
-        case 'brush': {
-          const xs = this.path.map(p => Math.abs(p[0])), ys = this.path.map(p => Math.abs(p[1]));
-          return [Math.max(...xs) + this.width, Math.max(...ys) + this.width];
-        }
         case 'worldlines': return [this.width / 2 + 130, this.height * 0.7 + 20];
         case 'scratches': case 'marks': return [this.spread / 2 + 24, this.spread * 0.35 + 24];
         default: return [this.r, this.r];

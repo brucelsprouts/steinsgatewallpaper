@@ -1,0 +1,19 @@
+{
+  "display": {
+    "type": "dropdown",
+    "value": 0,
+    "text": "Display",
+    "items": ["Time", "Date", "Worldline"]
+  },
+  "glow": {
+    "type": "dropdown",
+    "value": 0,
+    "text": "Glow colour",
+    "items": ["Orange", "White"]
+  },
+  "shift": {
+    "type": "checkbox",
+    "value": true,
+    "text": "Worldline shifts"
+  }
+}
