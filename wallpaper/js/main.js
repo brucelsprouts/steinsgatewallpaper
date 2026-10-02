@@ -1,38 +1,36 @@
 'use strict';
-// Boot, layout, render loop, frame cap and pausing.
+// Boot, layout, render loop, input, frame cap and pausing.
 (() => {
   const DESIGN_W = 2560, DESIGN_H = 1440;
   const cv = document.getElementById('c');
   const ctx = cv.getContext('2d');
   const q = Config.query;
 
-  // Debug hooks: ?now=2026-10-02T09:59:55 fakes the wall clock; ?still=3.2 renders one
-  // frame at that many seconds after boot; ?shiftAt=5 triggers a worldline shift then.
+  // Debug hooks (not settings): ?now=2026-10-02T09:59:55 fakes the wall clock,
+  // ?still=3.2 renders a single frame that many seconds after boot, ?shiftAt=5 fires
+  // a worldline shift then, ?cursor=0.8,-0.4 pins the parallax camera.
   const fakeNow = q.get('now') ? new Date(q.get('now')).getTime() : null;
   const still = q.has('still') ? Number(q.get('still')) : null;
   const shiftAt = q.has('shiftAt') ? Number(q.get('shiftAt')) : null;
+  const cursor = q.get('cursor') ? q.get('cursor').split(',').map(Number) : null;
+  const manual = q.has('manual'); // tools/record.html drives frames itself
   let simT = 0;
   const clock = () => new Date(fakeNow != null ? fakeNow + simT * 1000 : Date.now());
+  const theme = () => (Config.get('glow') === 'white' ? 'cold' : 'warm');
 
-  const LAYOUTS = {
-    main: { meter: { cx: 860, cy: 780, tubeH: 240 } },
-    quiet: { meter: { cx: 860, cy: 780, tubeH: 240 } },
-  };
+  const scene = new Scene.Scene();
+  const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
+  const controller = new Display.Controller(meter, clock);
+  controller.onShift = t => scene.shifts.push(t);
+  if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.cam.x = cursor[0]; scene.cam.y = cursor[1]; }
 
-  let view, meter, controller, vignette, dither;
-
-  function makeScene() {
-    const L = LAYOUTS[Config.get('layout')] || LAYOUTS.main;
-    meter = new Nixie.Meter({ ...L.meter, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
-    meter.master = Config.get('brightness') / 100;
-    controller = new Display.Controller(meter, clock);
-  }
+  let view, vignette, dither;
 
   function buildSprites() {
-    meter.build(view.S, Config.get('theme'));
-    // Vignette at quarter resolution with an eased falloff; it is a smooth gradient,
-    // so upscaling is invisible. Dither (below) hides 8-bit banding.
-    const k = 0.25, W = cv.width, H = cv.height;
+    meter.build(view.S, theme());
+    scene.build(view.S, view, theme());
+    // Vignette at quarter resolution with an eased falloff; dither hides 8-bit banding.
+    const k = 0.25, W = view.W, H = view.H;
     vignette = Kit.canvas(W * k, H * k);
     const g = vignette.getContext('2d');
     const r = g.createRadialGradient(W * k / 2, H * k / 2, H * k * 0.3, W * k / 2, H * k / 2, W * k * 0.62);
@@ -45,7 +43,7 @@
     dither = ditherPattern();
   }
 
-  // Static additive noise tile: breaks up banding in dark gradients on 8-bit panels.
+  // Static additive noise tile.
   function ditherPattern() {
     const n = Kit.canvas(256, 256), g = n.getContext('2d');
     const img = g.createImageData(256, 256), r = Kit.rng(99);
@@ -60,7 +58,7 @@
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const W = Math.round(window.innerWidth * dpr), H = Math.round(window.innerHeight * dpr);
-    if (W === cv.width && H === cv.height && view) return;
+    if (view && W === cv.width && H === cv.height) return;
     cv.width = W; cv.height = H;
     // Fit the 2560x1440 design to the limiting dimension; extra space stays dark.
     const S = Math.min(W / DESIGN_W, H / DESIGN_H);
@@ -71,12 +69,16 @@
   let lastT = 0;
   function render(t) {
     lastT = t;
+    const now = clock();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#040303';
     ctx.fillRect(0, 0, view.W, view.H);
+    scene.drawBehind(ctx, view, t, now);
     meter.draw(ctx, view, t);
+    scene.drawFront(ctx, view, t, now);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(vignette, 0, 0, view.W, view.H);
@@ -91,55 +93,70 @@
     if (shiftAt != null && !step.fired && t >= shiftAt) { step.fired = true; controller.shift(t); }
     controller.tick(t);
     meter.update(t);
+    scene.update(t);
   }
 
   // ---------- Loop: capped frame rate, fully stopped while paused or hidden ----------
   const t0 = performance.now();
+  const elapsed = () => (performance.now() - t0) / 1000;
   let raf = 0, last = 0, hostPaused = false;
 
-  function frame(now) {
+  function frame(nowMs) {
     raf = requestAnimationFrame(frame);
-    const interval = 1000 / Math.max(1, Config.get('fps'));
-    if (now - last < interval - 2) return;
-    last = now;
-    const t = (now - t0) / 1000;
+    if (nowMs - last < 1000 / Config.fps() - 2) return;
+    last = nowMs;
+    const t = (nowMs - t0) / 1000;
     step(t);
     render(t);
   }
-  function running() { return raf !== 0; }
+  const running = () => raf !== 0;
   function start() { if (!running()) { last = 0; raf = requestAnimationFrame(frame); } }
   function stop() { cancelAnimationFrame(raf); raf = 0; }
   function syncRunning() { (hostPaused || document.hidden) ? stop() : start(); }
 
   Config.on('pause', p => { hostPaused = !!p; syncRunning(); });
-  Config.on('shift', () => controller.shift((performance.now() - t0) / 1000));
   document.addEventListener('visibilitychange', syncRunning);
 
   Config.onChange((key, v) => {
-    const t = (performance.now() - t0) / 1000;
-    if (key === 'theme') buildSprites();
-    else if (key === 'brightness') meter.master = v / 100;
-    else if (key === 'mode') controller.setMode(v, t);
-    else if (key === 'layout') { makeScene(); buildSprites(); controller.boot(t); }
+    if (key === 'glow') buildSprites();
+    else if (key === 'display') controller.setMode(v, elapsed());
     if (!running()) render(lastT);
   });
+
+  // Lively and Wallpaper Engine forward desktop mouse input to the page.
+  if (!cursor) {
+    window.addEventListener('pointermove', e => {
+      scene.pointer(e.clientX / window.innerWidth * 2 - 1, e.clientY / window.innerHeight * 2 - 1);
+    });
+  }
+  window.addEventListener('pointerdown', e => { if (e.button === 0) controller.shift(elapsed()); });
   // Resizing clears the canvas; repaint at once so a paused wallpaper never goes blank.
   window.addEventListener('resize', () => { resize(); render(lastT); });
 
-  makeScene();
   resize();
-
-  if (still != null) {
+  controller.boot(0);
+  if (manual) {
+    render(0);
+  } else if (still != null) {
     // Deterministic single frame for screenshots: simulate at 30 fps up to `still`.
-    controller.boot(0);
     for (let t = 0; t <= still + 1e-6; t += 1 / 30) step(t);
     render(still);
     document.title += ' (still)';
   } else {
-    controller.boot(0);
     syncRunning();
   }
 
-  // Console helper: SG.shift() triggers a worldline shift.
-  window.SG = { config: Config, shift: () => controller.shift((performance.now() - t0) / 1000) };
+  // Console helper: SG.shift() triggers a worldline shift. The rest drive recordings.
+  let simLast = 0;
+  window.SG = {
+    config: Config,
+    shift: () => controller.shift(manual ? simLast : elapsed()),
+    pointer: (x, y) => scene.pointer(x, y),
+    renderAt(t) {
+      for (let s = simLast + 1 / 30; s < t; s += 1 / 30) step(s);
+      step(t);
+      render(t);
+      simLast = t;
+    },
+  };
 })();

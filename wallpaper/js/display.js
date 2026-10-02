@@ -1,92 +1,77 @@
 'use strict';
-// Decides what the tubes say: time / divergence / date, the hourly worldline
-// shift, and the divergence interlude that follows it in time mode.
+// What the tubes say, and when the worldline shifts.
+//   Time / Date: a shift shows a canon worldline for ~10 s, then rolls back.
+//   Worldline:   a shift lands on a new canon value and stays there.
 const Display = (() => {
-  const HOME = '1.048596';
-  // Canon Alpha and Beta attractor-field values.
-  const CANON = ['0.571024', '0.571046', '0.523299', '0.523307', '0.456903', '0.409431',
-    '0.337187', '1.130205', '1.130426', '1.129848'];
+  const WORLDLINES = ['0.571024', '0.337187', '1.130205', '1.048596'];
+  const INTERLUDE = 10;              // seconds a worldline shows in time/date mode
+  const MIN_GAP = 20 * 60, MAX_GAP = 60 * 60;
 
   const pad = n => String(n).padStart(2, '0');
-
-  function pickWorldline(kind) {
-    if (kind === 'fixed') return HOME;
-    if (kind === 'random') {
-      const v = Math.floor(Math.random() * 1e6);
-      return (Math.random() < 0.5 ? '0.' : '1.') + String(v).padStart(6, '0');
-    }
-    return Math.random() < 0.7 ? HOME : CANON[Math.floor(Math.random() * CANON.length)];
-  }
-
-  function formatTime(d, hour12) {
-    let h = d.getHours();
-    if (hour12) h = h % 12 || 12;
-    return `${pad(h)}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;
-  }
-
-  function formatDate(d) {
-    return `${pad(d.getMonth() + 1)}.${pad(d.getDate())}.${pad(d.getFullYear() % 100)}`;
-  }
+  // 24-hour: with every tube in use there is no room for an AM/PM marker.
+  const formatTime = d => `${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;
+  const formatDate = d => `${pad(d.getFullYear() % 100)}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
 
   class Controller {
-    constructor(meter, clock) {
+    constructor(meter, clock, random = Math.random) {
       this.meter = meter;
       this.clock = clock;
-      this.worldline = HOME;
+      this.random = random;
+      this.mode = Config.get('display');
+      this.worldline = WORLDLINES[Math.floor(random() * WORLDLINES.length)];
       this.interludeUntil = -1;
       this.inInterlude = false;
-      this.hourKey = null;
-      this.mode = Config.get('mode');
-      this.onShift = null;
+      this.nextShift = Infinity;
+      this.onShift = null; // called with t when clocks should spin
+    }
+
+    schedule(t) { this.nextShift = t + MIN_GAP + this.random() * (MAX_GAP - MIN_GAP); }
+
+    pickWorldline() {
+      const others = WORLDLINES.filter(v => v !== this.worldline);
+      return others[Math.floor(this.random() * others.length)];
     }
 
     text(t) {
+      if (this.mode === 'worldline' || t < this.interludeUntil) return this.worldline;
       const d = this.clock();
-      if (this.mode === 'divergence') return this.worldline;
-      if (this.mode === 'date') return formatDate(d);
-      if (t < this.interludeUntil) return this.worldline;
-      return formatTime(d, Config.get('hour12'));
+      return this.mode === 'date' ? formatDate(d) : formatTime(d);
     }
 
-    shift(t, { newWorldline = true } = {}) {
-      if (newWorldline) this.worldline = pickWorldline(Config.get('worldlines'));
-      if (this.mode === 'time') this.interludeUntil = t + Config.get('hold');
+    // A full worldline shift: tubes scramble and land on a new value, clocks spin.
+    shift(t) {
+      if (!Config.get('shift')) return;
+      this.worldline = this.pickWorldline();
+      if (this.mode !== 'worldline') this.interludeUntil = t + INTERLUDE;
       this.meter.startShift(t);
       this.onShift?.(t);
+      this.schedule(t);
     }
 
     setMode(m, t) {
       if (m === this.mode) return;
       this.mode = m;
       this.interludeUntil = -1;
-      this.meter.startShift(t);
-      this.onShift?.(t);
+      if (Config.get('shift')) this.meter.startShift(t);
     }
 
     boot(t) {
-      this.hourKey = this.key();
       this.meter.target = this.text(t);
-      this.meter.startShift(t);
-      this.onShift?.(t);
-    }
-
-    key() {
-      const d = this.clock();
-      return d.getFullYear() * 1e6 + d.getMonth() * 1e4 + d.getDate() * 100 + d.getHours();
+      if (Config.get('shift')) this.meter.startShift(t);
+      this.schedule(t);
     }
 
     tick(t) {
-      const k = this.key();
-      if (k !== this.hourKey) {
-        this.hourKey = k;
-        if (Config.get('hourlyShift')) this.shift(t);
+      if (t >= this.nextShift) {
+        if (Config.get('shift')) this.shift(t); else this.schedule(t);
       }
-      const inside = this.mode === 'time' && t < this.interludeUntil;
-      if (this.inInterlude && !inside) { this.meter.startShift(t); this.onShift?.(t); }
+      // End of the interlude: roll the tubes back (the clocks already had their moment).
+      const inside = t < this.interludeUntil;
+      if (this.inInterlude && !inside) this.meter.startShift(t);
       this.inInterlude = inside;
       this.meter.target = this.text(t);
     }
   }
 
-  return { Controller, HOME, CANON, formatTime, formatDate };
+  return { Controller, WORLDLINES, formatTime, formatDate };
 })();

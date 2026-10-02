@@ -332,7 +332,7 @@ const Nixie = (() => {
     }
 
     layout() {
-      const h = this.tubeH, G = geometry(h, this.aspect), w = G.w, gap = h * 0.075;
+      const h = this.tubeH, G = geometry(h, this.aspect), w = G.w, gap = h * 0.03;
       const total = this.count * w + (this.count - 1) * gap;
       this.G = G;
       this.L = { total, w, h, xs: Array.from({ length: this.count }, (_, i) => i * (w + gap)) };
