@@ -16,7 +16,7 @@ function load(settings) {
 }
 
 function fakeMeter() {
-  return { target: '', shifts: [], startShift(t) { this.shifts.push(t); } };
+  return { target: '', shifts: [], flashes: [], startShift(t) { this.shifts.push(t); }, flash(t) { this.flashes.push(t); } };
 }
 
 const NOW = new Date(2026, 9, 2, 9, 5, 7); // 2026-10-02 09:05:07 local
@@ -94,7 +94,7 @@ test('every shift picks a different worldline', () => {
   }
 });
 
-test('shift off: no random shifts, clicks do nothing', () => {
+test('shift off: no random shifts', () => {
   const { Display } = load({ shift: false });
   const m = fakeMeter(), c = new Display.Controller(m, () => NOW);
   c.boot(0);
@@ -112,6 +112,55 @@ test('the scheduled shift fires by itself', () => {
   assert.strictEqual(m.shifts.length, 1);
   c.tick(1200);
   assert.strictEqual(m.shifts.length, 2);
+});
+
+test('time mode: a click spins the clocks and flashes, keeping the time', () => {
+  const { Display } = load();
+  const m = fakeMeter(), c = new Display.Controller(m, () => NOW);
+  let spins = 0;
+  c.onShift = () => spins++;
+  c.boot(0);
+  const wl = c.worldline;
+  c.click(30);
+  c.tick(30.5);
+  assert.strictEqual(m.target, '09.05.07');
+  assert.strictEqual(c.worldline, wl);
+  assert.deepStrictEqual(m.flashes, [30]);
+  assert.deepStrictEqual(m.shifts, [0]);
+  assert.strictEqual(spins, 1);
+});
+
+test('date mode: a click keeps the date too', () => {
+  const { Display } = load({ display: 'date' });
+  const m = fakeMeter(), c = new Display.Controller(m, () => NOW);
+  c.boot(0);
+  c.click(30);
+  c.tick(31);
+  assert.strictEqual(m.target, '26.10.02');
+  assert.deepStrictEqual(m.flashes, [30]);
+});
+
+test('worldline mode: a click shifts to a new worldline', () => {
+  const { Display } = load({ display: 'worldline' });
+  const m = fakeMeter(), c = new Display.Controller(m, () => NOW);
+  c.boot(0);
+  c.tick(0);
+  const first = m.target;
+  c.click(30);
+  c.tick(31);
+  assert.notStrictEqual(m.target, first);
+  assert.deepStrictEqual(m.flashes, []);
+});
+
+test('shift off: clicks do nothing at all', () => {
+  const { Display } = load({ shift: false });
+  const m = fakeMeter(), c = new Display.Controller(m, () => NOW);
+  let spins = 0;
+  c.onShift = () => spins++;
+  c.boot(0);
+  c.click(30);
+  assert.deepStrictEqual(m.flashes, []);
+  assert.strictEqual(spins, 0);
 });
 
 process.exitCode = failures ? 1 : 0;

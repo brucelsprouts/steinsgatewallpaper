@@ -353,6 +353,9 @@ const Nixie = (() => {
       this.shift = { start: t, seed, settle, end: Math.max(...settle) + 2.2 };
     }
 
+    // A quick stutter and flare without changing any digit.
+    flash(t) { this.flashAt = t; }
+
     get shifting() { return !!this.shift; }
 
     charAt(i, t) {
@@ -384,6 +387,12 @@ const Nixie = (() => {
       if (hash(win, 200 + i) < 0.06) {
         const d = hash(win, 300 + i) * 0.9, ph = u - win;
         if (ph > d && ph < d + 0.025) b *= 0.82;
+      }
+      // Click flash: a quick stutter, then a flare that fades.
+      if (this.flashAt != null) {
+        const f = t - this.flashAt;
+        if (f >= 0 && f < 0.26) b *= hash(Math.floor(f * 40), i + 70) < 0.4 ? 0.3 : 1.1;
+        else if (f >= 0.26 && f < 2) b *= 1 + 0.6 * Math.exp(-(f - 0.26) / 0.3);
       }
       const s = this.shift;
       if (s) {

@@ -1,12 +1,12 @@
 'use strict';
-// Clockwork: dials, hands and gears, pre-rendered (blur baked in per depth plane)
-// and placed each frame with an affine "3D tilt" so discs read as seen at an angle.
+// Clockwork: dials, hands, gears and an escapement, pre-rendered per depth plane
+// and placed each frame with a gentle affine "3D tilt".
 const Mech = (() => {
   const { TAU, canvas, clamp, ease, hash } = Kit;
 
   const PALETTES = {
-    warm: { line: '196,170,140', rim: '170,140,112', solid: '15,12,10' },
-    cold: { line: '172,180,192', rim: '150,158,172', solid: '11,12,14' },
+    warm: { line: '196,170,140', rim: '178,148,118', solid: '17,14,11', jewel: '200,50,72' },
+    cold: { line: '172,180,192', rim: '158,166,180', solid: '12,13,15', jewel: '200,50,72' },
   };
 
   // ---------- 2D affine matrices, canvas order [a, b, c, d, e, f] ----------
@@ -36,8 +36,6 @@ const Mech = (() => {
     return { c: b, half };
   }
 
-  // ---------- Dial parts (local coords, centre at 0,0, 12 o'clock = -y) ----------
-  const ROMAN = ['XII', 'I', 'II', 'III', 'IIII', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
   const ring = (g, r, w) => { g.lineWidth = w; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke(); };
   const spoke = (g, a, r0, r1) => {
     g.beginPath();
@@ -45,6 +43,24 @@ const Mech = (() => {
     g.lineTo(Math.sin(a) * r1, -Math.cos(a) * r1);
     g.stroke();
   };
+
+  // Soft catch-light on a rim. Drawn without the part's rotation, so metal seems
+  // to turn under a fixed light.
+  function drawShine(g, R, glass) {
+    g.lineCap = 'round';
+    if (glass) {
+      g.strokeStyle = 'rgba(255,248,236,0.5)';
+      g.lineWidth = R * 0.12;
+      g.beginPath(); g.arc(0, 0, R * 0.8, -2.55, -1.75); g.stroke();
+      return;
+    }
+    g.strokeStyle = 'rgba(255,246,232,0.9)';
+    g.lineWidth = Math.max(1.5, R * 0.035);
+    g.beginPath(); g.arc(0, 0, R * 0.93, -2.6, -1.65); g.stroke();
+  }
+
+  // ---------- Dial parts (local coords, centre at 0,0, 12 o'clock = -y) ----------
+  const ROMAN = ['XII', 'I', 'II', 'III', 'IIII', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 
   function drawChapter(g, r, lw, numerals = true) {
     g.lineCap = 'round';
@@ -112,7 +128,6 @@ const Mech = (() => {
     p.quadraticCurveTo(w * 0.2, -s0 * 0.9, w * 0.45, -s0 * 0.55);
     p.lineTo(w * 0.5, len * 0.12);
     p.closePath();
-    // Spade: two arcs meeting at a point, open in the middle.
     const sp = new Path2D();
     const mid = (s0 + s1) / 2;
     sp.moveTo(0, -s0);
@@ -130,43 +145,47 @@ const Mech = (() => {
   }
 
   // ---------- Gears ----------
-  // A gear is defined by its train's circular pitch p and tooth count; teeth are
-  // chunky and nearly square. Tooth k is centred at angle step*(k + 0.25).
-  function gearDims(p, teeth) {
-    const rp = teeth * p / TAU, depth = p * 0.5;
-    return { rp, r: rp + depth / 2, root: rp - depth / 2, step: TAU / teeth };
+  // A gear is defined by its train's circular pitch p and tooth count. Tooth k of a
+  // standard gear is centred at angle step*(k + 0.25).
+  function gearDims(p, teeth, profile) {
+    const rp = teeth * p / TAU, depth = p * (profile === 'escape' ? 0.9 : 0.5);
+    return { rp, r: rp + depth / 2, root: rp - depth / 2, step: TAU / teeth, teeth };
   }
 
-  function gearPath(G, spokes, holes) {
-    const { r, root, step } = G;
-    const teeth = Math.round(TAU / step);
+  function gearPath(G, o) {
+    const { r, root, step, teeth } = G;
     const p = new Path2D();
-    const at = (rad, a) => [Math.cos(a) * rad, Math.sin(a) * rad];
+    const pt = (rad, a) => [Math.cos(a) * rad, Math.sin(a) * rad];
     for (let i = 0; i < teeth; i++) {
       const a0 = i * step;
-      const pts = [[root, a0 + step * 0.02], [r, a0 + step * 0.08], [r, a0 + step * 0.42], [root, a0 + step * 0.48]];
-      pts.forEach(([rad, a], k) => {
-        const [x, y] = at(rad, a);
-        (i === 0 && k === 0) ? p.moveTo(x, y) : p.lineTo(x, y);
-      });
-      p.arc(0, 0, root, a0 + step * 0.48, a0 + step * 1.02);
+      const pts = o.profile === 'escape'
+        // Ratchet-like club teeth of an escape wheel.
+        ? [[root, a0], [r, a0 + step * 0.55], [r, a0 + step * 0.68], [root + (r - root) * 0.18, a0 + step * 0.74]]
+        // Chunky, nearly square teeth.
+        : [[root, a0 + step * 0.02], [r, a0 + step * 0.08], [r, a0 + step * 0.42], [root, a0 + step * 0.48]];
+      pts.forEach(([rad, a], k) => { const [x, y] = pt(rad, a); (i === 0 && k === 0) ? p.moveTo(x, y) : p.lineTo(x, y); });
+      p.arc(0, 0, root, pts[3][1], a0 + step + (o.profile === 'escape' ? 0 : step * 0.02));
     }
     p.closePath();
-    const ri = root - G.r * 0.13, rh = G.r * 0.24;
+    const spokes = o.spokes ?? 5;
+    const ri = root - G.r * (o.rim ?? 0.13), rh = G.r * 0.24;
     if (spokes > 0) {
-      const sw = G.r * 0.07;
+      const sw = G.r * (o.spokeWidth ?? 0.07), bend = o.curved ? 0.42 : 0;
       for (let i = 0; i < spokes; i++) {
         const s0 = i * TAU / spokes, s1 = s0 + TAU / spokes;
         const dO = Math.asin(Math.min(1, sw / ri)), dI = Math.asin(Math.min(1, sw / rh));
-        p.moveTo(Math.cos(s0 + dO) * ri, Math.sin(s0 + dO) * ri);
+        const rm = (ri + rh) / 2;
+        p.moveTo(...pt(ri, s0 + dO));
         p.arc(0, 0, ri, s0 + dO, s1 - dO);
-        p.arc(0, 0, rh, s1 - dI, s0 + dI, true);
+        p.quadraticCurveTo(...pt(rm, s1 - dO + bend * 0.5), ...pt(rh, s1 - dI + bend));
+        p.arc(0, 0, rh, s1 - dI + bend, s0 + dI + bend, true);
+        p.quadraticCurveTo(...pt(rm, s0 + dO + bend * 0.5), ...pt(ri, s0 + dO));
         p.closePath();
       }
-    } else if (holes > 0) {
+    } else if ((o.holes ?? 0) > 0) {
       const hr = (ri - rh) * 0.36, hc = (ri + rh) / 2;
-      for (let i = 0; i < holes; i++) {
-        const a = i * TAU / holes;
+      for (let i = 0; i < o.holes; i++) {
+        const a = i * TAU / o.holes;
         p.moveTo(Math.cos(a) * hc + hr, Math.sin(a) * hc);
         p.arc(Math.cos(a) * hc, Math.sin(a) * hc, hr, 0, TAU);
       }
@@ -177,23 +196,101 @@ const Mech = (() => {
     return p;
   }
 
+  function drawJewel(g, rad, pal) {
+    g.fillStyle = `rgba(${pal.jewel},0.85)`;
+    g.beginPath(); g.arc(0, 0, rad, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(255,230,230,0.7)';
+    g.beginPath(); g.arc(-rad * 0.3, -rad * 0.3, rad * 0.32, 0, TAU); g.fill();
+  }
+
   function drawGear(g, G, o, pal) {
-    const p = gearPath(G, o.spokes ?? 5, o.holes ?? 0);
+    const p = gearPath(G, o);
+    const solid = o.style === 'solid';
+    const lw = o.lw ?? Math.max(1, G.r * 0.008);
     g.lineJoin = 'round';
-    if (o.style === 'solid') {
+    if (solid) {
       g.fillStyle = `rgb(${pal.solid})`;
       g.fill(p, 'evenodd');
       g.strokeStyle = `rgba(${pal.rim},0.5)`;
-      g.lineWidth = Math.max(1, G.r * 0.012);
+      g.lineWidth = Math.max(1.2, G.r * 0.009);
       g.stroke(p);
     } else {
-      g.fillStyle = `rgba(${pal.line},0.14)`;
+      // A faint metal disc, a little brighter toward the rim.
+      const fg = g.createRadialGradient(0, 0, G.r * 0.1, 0, 0, G.r);
+      fg.addColorStop(0, `rgba(${pal.line},0.06)`);
+      fg.addColorStop(1, `rgba(${pal.line},0.17)`);
+      g.fillStyle = fg;
       g.fill(p, 'evenodd');
       g.strokeStyle = `rgb(${pal.line})`;
-      g.lineWidth = o.lw ?? Math.max(1, G.r * 0.008);
+      g.lineWidth = lw;
       g.stroke(p);
-      g.beginPath(); g.arc(0, 0, G.r * 0.14, 0, TAU); g.stroke();
     }
+    // Machined details: rim band, hub collar, screws.
+    g.strokeStyle = solid ? `rgba(${pal.rim},0.35)` : `rgba(${pal.line},0.7)`;
+    if (G.r > 40 && (o.spokes ?? 5) > 0) ring(g, G.root - G.r * 0.04, lw * 0.6);
+    ring(g, G.r * 0.15, lw * 0.7);
+    if (G.r > 60) {
+      g.lineWidth = lw * 0.7;
+      for (let i = 0; i < 3; i++) {
+        const a = i / 3 * TAU + 0.5, x = Math.cos(a) * G.r * 0.195, y = Math.sin(a) * G.r * 0.195, sr = G.r * 0.022;
+        g.beginPath(); g.arc(x, y, sr, 0, TAU); g.stroke();
+        g.beginPath();
+        g.moveTo(x - sr * Math.cos(a + 1), y - sr * Math.sin(a + 1));
+        g.lineTo(x + sr * Math.cos(a + 1), y + sr * Math.sin(a + 1));
+        g.stroke();
+      }
+    }
+    if (o.jewel) drawJewel(g, Math.max(2, G.r * 0.05), pal);
+  }
+
+  // Anchor (pallet fork), pivot at 0,0, pallets pointing down (+y) to the escape wheel.
+  function drawPallet(g, L, lw, pal) {
+    g.lineWidth = lw;
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    const arm = new Path2D();
+    arm.moveTo(-L * 0.62, L * 0.5);
+    arm.quadraticCurveTo(-L * 0.3, -L * 0.05, 0, -L * 0.08);
+    arm.quadraticCurveTo(L * 0.3, -L * 0.05, L * 0.62, L * 0.5);
+    arm.moveTo(0, -L * 0.08);
+    arm.lineTo(0, -L * 0.95);
+    g.stroke(arm);
+    g.beginPath(); g.moveTo(-L * 0.1, -L * 1.08); g.lineTo(-L * 0.1, -L * 0.92); g.lineTo(L * 0.1, -L * 0.92); g.lineTo(L * 0.1, -L * 1.08); g.stroke();
+    ring(g, L * 0.09, lw);
+    // Ruby pallet stones.
+    for (const sx of [-1, 1]) {
+      g.save();
+      g.translate(sx * L * 0.62, L * 0.5);
+      g.rotate(sx * 0.5);
+      g.fillStyle = `rgba(${pal.jewel},0.8)`;
+      g.fillRect(-L * 0.05, -L * 0.02, L * 0.1, L * 0.2);
+      g.restore();
+    }
+  }
+
+  function drawBalance(g, R, lw, pal) {
+    ring(g, R, lw * 1.4);
+    ring(g, R * 0.88, lw * 0.8);
+    g.lineWidth = lw;
+    for (let i = 0; i < 3; i++) spoke(g, i / 3 * TAU, R * 0.1, R * 0.88);
+    g.lineWidth = lw * 0.8;
+    for (let i = 0; i < 10; i++) {
+      const a = i / 10 * TAU;
+      g.beginPath(); g.arc(Math.sin(a) * R * 1.04, -Math.cos(a) * R * 1.04, R * 0.045, 0, TAU); g.stroke();
+    }
+    ring(g, R * 0.1, lw);
+    drawJewel(g, Math.max(2, R * 0.05), pal);
+  }
+
+  function drawHairspring(g, R, lw) {
+    g.lineWidth = lw * 0.6;
+    g.beginPath();
+    const turns = 7;
+    for (let i = 0; i <= 600; i++) {
+      const u = i / 600, a = u * turns * TAU, rad = R * (0.12 + 0.55 * u);
+      i ? g.lineTo(Math.cos(a) * rad, Math.sin(a) * rad) : g.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    }
+    g.stroke();
   }
 
   // ---------- Motion helpers ----------
@@ -232,8 +329,9 @@ const Mech = (() => {
     constructor(o) {
       Object.assign(this, {
         x: 0, y: 0, depth: 0, blur: 0, res: 1, alpha: 0.12, rx: 0, ry: 0, roll: 0,
-        drift: 14, seed: 1, beat: { period: 2, dur: 0.7, teeth: 0.25 }, parts: [],
+        drift: 12, seed: 1, beat: { period: 2, dur: 0.7, teeth: 0.25 }, parts: [], shine: 0.5,
       }, o);
+      this.cam = { x: 0, y: 0 };
       this.linkGears();
       this.kick = new Kicker(this.seed * 31, 9);
       this.parts.forEach((p, j) => {
@@ -248,8 +346,11 @@ const Mech = (() => {
     linkGears() {
       for (const p of this.parts) {
         if (p.type !== 'gear') continue;
-        p.G = gearDims(p.pitch, p.teeth);
-        if (p.mesh == null) { p.x = p.x ?? 0; p.y = p.y ?? 0; p.theta = p.theta ?? 0; p.dir = p.dir ?? 1; continue; }
+        if (p.mesh == null) {
+          p.G = gearDims(p.pitch, p.teeth, p.profile);
+          Object.assign(p, { x: p.x ?? 0, y: p.y ?? 0, theta: p.theta ?? 0, dir: p.dir ?? 1 });
+          continue;
+        }
         const A = this.parts[p.mesh.to], b = p.mesh.angle;
         p.pitch = A.pitch;
         p.G = gearDims(p.pitch, p.teeth);
@@ -265,18 +366,19 @@ const Mech = (() => {
 
     build(S, pal) {
       const { blur, res } = this;
-      const lw = 1.2;
+      const col = `rgb(${pal.line})`;
+      const paint = fn => g => { g.strokeStyle = g.fillStyle = col; fn(g); };
       for (const p of this.parts) {
         if (p.type === 'gear') {
           p.sp = bake(p.G.r, S, res, blur, g => drawGear(g, p.G, p, pal));
+          p.shineSp = bake(p.G.r, S, Math.min(res, 0.4), blur + p.G.r * 0.02, g => drawShine(g, p.G.r, false));
         } else if (p.type === 'dial') {
-          const col = `rgb(${pal.line})`;
-          const paint = fn => g => { g.strokeStyle = g.fillStyle = col; fn(g); };
-          const w = Math.max(lw, p.r * 0.004);
+          const w = Math.max(1.2, p.r * 0.004);
           p.rings = [];
           p.rings.push({ sp: bake(p.r, S, res, blur, paint(g => drawChapter(g, p.r, w, p.numerals !== false))), turn: p.turn ?? 0 });
           if (p.ring24) p.rings.push({ sp: bake(p.r * 0.72, S, res, blur, paint(g => drawRing24(g, p.r * 0.72, w))), turn: -(p.turn ?? 1) * 0.7 });
           if (p.track !== false) p.rings.push({ sp: bake(p.r * 0.6, S, res, blur, paint(g => drawTrack(g, p.r * 0.6, w))), turn: (p.turn ?? 1) * 0.4 });
+          p.shineSp = bake(p.r, S, Math.min(res, 0.4), blur + p.r * 0.04, g => drawShine(g, p.r, true));
           if (p.hands !== false) {
             p.hand = {
               h: bake(p.r * 0.5, S, res, blur, paint(g => drawHand(g, p.r * 0.48, p.r * 0.028, w * 1.2, 'hour'))),
@@ -284,35 +386,59 @@ const Mech = (() => {
             };
             if (p.seconds) p.hand.s = bake(p.r * 0.86, S, res, blur, paint(g => drawHand(g, p.r * 0.84, p.r * 0.012, w * 0.9, 'second')));
           }
+        } else if (p.type === 'pallet') {
+          p.sp = bake(p.L * 1.15, S, res, blur, paint(g => drawPallet(g, p.L, 1.4, pal)));
+        } else if (p.type === 'balance') {
+          p.sp = bake(p.r * 1.1, S, res, blur, paint(g => drawBalance(g, p.r, 1.4, pal)));
+          p.springSp = bake(p.r, S, res, blur, paint(g => drawHairspring(g, p.r, 1.4)));
         }
       }
     }
 
-    // cam: smoothed cursor/idle offset in [-1, 1]; shifts: worldline shift start times.
-    draw(ctx, view, t, cam, now, shifts) {
-      const P = 38;
+    draw(ctx, view, t, now, shifts) {
+      const P = 42, cam = this.cam;
       const dx = Math.sin(t / 97 + this.seed) * this.drift + Math.sin(t / 41 + this.seed * 3) * this.drift * 0.35;
       const dy = Math.cos(t / 113 + this.seed * 2) * this.drift * 0.7;
       const ox = this.x + dx - cam.x * P * this.depth;
       const oy = this.y + dy - cam.y * P * this.depth * 0.7;
-      const look = 0.05 * (1 + Math.abs(this.depth));
+      const look = 0.03 * (1 + Math.abs(this.depth));
       const base = Mat.mul(
         [view.S, 0, 0, view.S, view.ox, view.oy],
         Mat.mul(Mat.T(ox, oy), Mat.mul(Mat.R(this.roll), Mat.tilt(this.rx + cam.y * look, this.ry - cam.x * look))),
       );
-      // Gear train phase in teeth: escapement steps plus worldline kicks.
       const b = this.beat;
       const phase = stepped(t, b.period, b.dur, b.teeth, this.seed * 0.37) + this.kick.value(t, shifts);
-      ctx.globalAlpha = this.alpha;
-      const handAlpha = this.alpha * (this.hands ?? 1);
       const put = (sp, m) => {
         ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
         ctx.drawImage(sp.c, -sp.half, -sp.half, sp.half * 2, sp.half * 2);
       };
+      const shine = (sp, at) => {
+        if (!sp || this.shine <= 0) return;
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = this.alpha * this.shine;
+        put(sp, at);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = this.alpha;
+      };
+      // Real seconds drive the escapement so it beats with the second hands.
+      const ms = now.getMilliseconds(), sec = now.getSeconds();
+      const beat = sec + ease.tick(clamp(ms / 160));
+      ctx.globalAlpha = this.alpha;
       for (const p of this.parts) {
         const at = Mat.mul(base, Mat.T(p.x || 0, p.y || 0));
         if (p.type === 'gear') {
-          put(p.sp, Mat.mul(at, Mat.R(p.theta + p.dir * phase * p.G.step)));
+          const spin = p.profile === 'escape'
+            ? -beat / 30 * TAU + p.handKicks[0].value(t, shifts)
+            : p.theta + p.dir * phase * p.G.step;
+          put(p.sp, Mat.mul(at, Mat.R(spin)));
+          shine(p.shineSp, at);
+        } else if (p.type === 'pallet') {
+          const from = sec % 2 ? -1 : 1;
+          const rock = 0.09 * (from - 2 * from * ease.tick(clamp(ms / 160)));
+          put(p.sp, Mat.mul(at, Mat.R(rock)));
+        } else if (p.type === 'balance') {
+          put(p.springSp, at);
+          put(p.sp, Mat.mul(at, Mat.R(2.1 * Math.sin(Math.PI * (sec + ms / 1000)))));
         } else if (p.type === 'dial') {
           p.rings.forEach((rg, i) => {
             const a = stepped(t, 7 + i * 2.3, 1.6, rg.turn * TAU / 60, this.seed + i) + p.ringKicks[i].value(t, shifts);
@@ -322,17 +448,18 @@ const Mech = (() => {
             // `tz` pins a dial to a UTC offset (hours); otherwise it shows local time.
             const shiftMin = p.tz == null ? 0 : p.tz * 60 + now.getTimezoneOffset();
             const d = new Date(now.getTime() + shiftMin * 60e3);
-            const ms = d.getMilliseconds(), s = d.getSeconds(), m = d.getMinutes(), h = d.getHours() % 12;
-            const secPos = s + ease.tick(clamp(ms / 220));
-            const minPos = m - 1 + ease.inOut(clamp((s + ms / 1000) / 0.9));
+            const dms = d.getMilliseconds(), s = d.getSeconds(), m = d.getMinutes(), h = d.getHours() % 12;
+            const secPos = s + ease.tick(clamp(dms / 220));
+            const minPos = m - 1 + ease.inOut(clamp((s + dms / 1000) / 0.9));
             const hourPos = h + m / 60 + s / 3600;
             const [kh, km, ks] = p.handKicks.map(k => k.value(t, shifts));
-            ctx.globalAlpha = handAlpha;
+            ctx.globalAlpha = this.alpha * (this.hands ?? 1);
             put(p.hand.h, Mat.mul(at, Mat.R(hourPos / 12 * TAU + kh)));
             put(p.hand.m, Mat.mul(at, Mat.R(minPos / 60 * TAU + km)));
             if (p.hand.s) put(p.hand.s, Mat.mul(at, Mat.R(secPos / 60 * TAU + ks)));
             ctx.globalAlpha = this.alpha;
           }
+          shine(p.shineSp, at);
         }
       }
     }

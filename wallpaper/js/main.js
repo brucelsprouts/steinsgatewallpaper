@@ -22,7 +22,7 @@
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
   const controller = new Display.Controller(meter, clock);
   controller.onShift = t => scene.shifts.push(t);
-  if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.cam.x = cursor[0]; scene.cam.y = cursor[1]; }
+  if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.settle(); }
 
   let view, vignette, dither;
 
@@ -76,7 +76,8 @@
     ctx.fillStyle = '#040303';
     ctx.fillRect(0, 0, view.W, view.H);
     scene.drawBehind(ctx, view, t, now);
-    meter.draw(ctx, view, t);
+    const m = scene.meterOffset(t);
+    meter.draw(ctx, { ...view, ox: view.ox + m.x * view.S, oy: view.oy + m.y * view.S }, t);
     scene.drawFront(ctx, view, t, now);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -129,7 +130,7 @@
       scene.pointer(e.clientX / window.innerWidth * 2 - 1, e.clientY / window.innerHeight * 2 - 1);
     });
   }
-  window.addEventListener('pointerdown', e => { if (e.button === 0) controller.shift(elapsed()); });
+  window.addEventListener('pointerdown', e => { if (e.button === 0) controller.click(elapsed()); });
   // Resizing clears the canvas; repaint at once so a paused wallpaper never goes blank.
   window.addEventListener('resize', () => { resize(); render(lastT); });
 
@@ -151,6 +152,7 @@
   window.SG = {
     config: Config,
     shift: () => controller.shift(manual ? simLast : elapsed()),
+    click: () => controller.click(manual ? simLast : elapsed()),
     pointer: (x, y) => scene.pointer(x, y),
     renderAt(t) {
       for (let s = simLast + 1 / 30; s < t; s += 1 / 30) step(s);

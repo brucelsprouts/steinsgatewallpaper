@@ -1,7 +1,8 @@
 'use strict';
 // What the tubes say, and when the worldline shifts.
-//   Time / Date: a shift shows a canon worldline for ~10 s, then rolls back.
-//   Worldline:   a shift lands on a new canon value and stays there.
+//   Time / Date: a random shift shows a canon worldline for ~10 s, then rolls back;
+//                a click only spins the clocks and flashes the tubes.
+//   Worldline:   a shift (random or click) lands on a new canon value and stays.
 const Display = (() => {
   const WORLDLINES = ['0.571024', '0.337187', '1.130205', '1.048596'];
   const INTERLUDE = 10;              // seconds a worldline shows in time/date mode
@@ -46,6 +47,15 @@ const Display = (() => {
       this.meter.startShift(t);
       this.onShift?.(t);
       this.schedule(t);
+    }
+
+    // A click never hides the time or date: the clocks spin and the tubes flash.
+    // Only in worldline mode does it move to a new worldline.
+    click(t) {
+      if (!Config.get('shift')) return;
+      if (this.mode === 'worldline') { this.shift(t); return; }
+      this.meter.flash(t);
+      this.onShift?.(t);
     }
 
     setMode(m, t) {
