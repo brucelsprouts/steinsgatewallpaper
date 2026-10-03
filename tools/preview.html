@@ -69,15 +69,25 @@
 <div id="panel">
   <div class="group" title="The wallpaper's own settings, applied the way Wallpaper Engine applies them">
     <span class="label">Centre</span>
-    <div class="seg" data-key="centre"><button data-v="makise">Makise</button><button data-v="nixie">Nixie</button></div>
+    <div class="seg" data-key="centre"><button data-v="makise">Makise</button><button data-v="time">Time</button><button data-v="date">Date</button><button data-v="worldline">Worldline</button></div>
   </div>
-  <div class="group">
-    <span class="label">Display</span>
-    <div class="seg" data-key="display"><button data-v="time">Time</button><button data-v="date">Date</button><button data-v="worldline">Worldline</button></div>
-  </div>
-  <div class="group">
+  <div class="group" title="The centrepiece's glow: Makise's backlight, or the tubes' bloom. 50 as designed">
     <span class="label">Glow</span>
-    <div class="seg" data-key="glow"><button data-v="orange">Orange</button><button data-v="white">White</button></div>
+    <input data-key="glow" type="range" min="0" max="100" step="5" aria-label="Glow strength"><output></output>
+    <span class="label">size</span>
+    <input data-key="glowSize" type="range" min="0" max="100" step="5" aria-label="Glow size"><output></output>
+  </div>
+  <div class="group" title="How strong the ink is. 50 as designed">
+    <span class="label">Ink</span>
+    <input data-key="ink" type="range" min="0" max="100" step="5" aria-label="Ink strength"><output></output>
+  </div>
+  <div class="group">
+    <span class="label">Motion</span>
+    <div class="seg" data-key="motion"><button data-v="true">On</button><button data-v="false">Off</button></div>
+  </div>
+  <div class="group">
+    <span class="label">Parallax</span>
+    <div class="seg" data-key="parallax"><button data-v="true">On</button><button data-v="false">Off</button></div>
   </div>
   <div class="group">
     <span class="label">Shifts</span>
@@ -90,7 +100,7 @@
     <button data-act="pause" id="pause" title="Pause the way the host does (P)">Pause</button>
   </div>
   <div class="group">
-    <span class="label">Ink</span>
+    <span class="label">Throw ink</span>
     <button data-ink="blot" title="Form a blot now (1)">Blot</button>
     <button data-ink="grit" title="Form a patch of grungy texture now (2)">Grit</button>
     <button data-ink="splash" title="Throw a splash now (3)">Splash</button>
@@ -100,11 +110,9 @@
     <span class="label">Speed</span>
     <div class="seg" data-key="speed"><button data-v="1">1×</button><button data-v="5">5×</button><button data-v="25">25×</button></div>
   </div>
-  <div class="group" title="How the ink is laid on. Strength: 100% is how strong it was before this preview existed">
+  <div class="group" title="How the ink is laid on">
     <span class="label">Paint</span>
     <div class="seg" data-key="blend"><button data-v="screen">Screen</button><button data-v="overlay">Overlay</button></div>
-    <input id="gain" type="range" min="0" max="150" step="5" aria-label="Paint strength">
-    <output id="gainv"></output>
   </div>
   <div class="group">
     <span class="label">Screen</span>
@@ -129,23 +137,27 @@ const dpr = window.devicePixelRatio || 1;
 // What the preview remembers lives in its own query string, so a reload (or a copied
 // link) comes back to the same view. Paint left unset follows the wallpaper's default.
 const q = new URLSearchParams(location.search);
+const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
+const SETTINGS = ['centre', 'glow', 'glowSize', 'ink', 'motion', 'parallax', 'shift'];
 const st = {
-  centre: q.get('centre') || 'makise',
-  display: q.get('display') || 'time',
-  glow: q.get('glow') || 'orange',
+  centre: ['makise', 'time', 'date', 'worldline'].includes(q.get('centre')) ? q.get('centre') : 'makise',
+  glow: num('glow', 50),
+  glowSize: num('glowSize', 50),
+  ink: num('ink', 50),
+  motion: q.get('motion') !== 'false',
+  parallax: q.get('parallax') !== 'false',
   shift: q.get('shift') !== 'false',
   speed: Number(q.get('speed')) || 1,
   blend: q.get('blend'),
-  gain: q.has('gain') ? Number(q.get('gain')) : null,
   screen: q.get('screen') || 'mine',
   seed: q.has('seed') ? Number(q.get('seed')) : Math.floor(Math.random() * 1e6),
   paused: false,
 };
-let paint = { blend: 'screen', gain: 1 }; // the wallpaper's own, read once it loads
+let paint = { blend: 'screen' }; // the wallpaper's own, read once it loads
 
 function save() {
   const p = new URLSearchParams();
-  for (const k of ['centre', 'display', 'glow', 'shift', 'speed', 'blend', 'gain', 'screen', 'seed']) if (st[k] != null) p.set(k, st[k]);
+  for (const k of [...SETTINGS, 'speed', 'blend', 'screen', 'seed']) if (st[k] != null) p.set(k, st[k]);
   history.replaceState(null, '', '?' + p);
 }
 
@@ -186,9 +198,9 @@ function win() { try { return wp.contentWindow.SG ? wp.contentWindow : null; } c
 const SG = () => win()?.SG;
 
 function load() {
-  const p = new URLSearchParams({ centre: st.centre, display: st.display, glow: st.glow, shift: st.shift, seed: st.seed, speed: st.speed });
+  const p = new URLSearchParams({ seed: st.seed, speed: st.speed });
+  for (const k of SETTINGS) p.set(k, st[k]);
   if (st.blend) p.set('inkBlend', st.blend);
-  if (st.gain != null) p.set('inkGain', st.gain);
   $('#info').textContent = 'loading…';
   wp.src = `../wallpaper/index.html?${p}`;
 }
@@ -213,9 +225,10 @@ function sync() {
     const v = String(current(seg.dataset.key));
     for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === v));
   }
-  const gain = st.gain ?? paint.gain;
-  $('#gain').value = Math.round(gain * 100);
-  $('#gainv').value = `${Math.round(gain * 100)}%`;
+  for (const r of document.querySelectorAll('input[data-key]')) {
+    r.value = st[r.dataset.key];
+    r.nextElementSibling.value = st[r.dataset.key];
+  }
   $('#pause').textContent = st.paused ? 'Resume' : 'Pause';
 }
 
@@ -224,7 +237,7 @@ for (const seg of document.querySelectorAll('.seg')) {
     const b = e.target.closest('button');
     if (!b) return;
     const key = seg.dataset.key, raw = b.dataset.v;
-    const v = key === 'shift' ? raw === 'true' : key === 'speed' ? Number(raw) : raw;
+    const v = raw === 'true' ? true : raw === 'false' ? false : key === 'speed' ? Number(raw) : raw;
     st[key] = v;
     save();
     sync();
@@ -236,12 +249,15 @@ for (const seg of document.querySelectorAll('.seg')) {
   });
 }
 
-$('#gain').addEventListener('input', e => {
-  st.gain = e.target.value / 100;
-  save();
-  sync();
-  SG()?.paint({ gain: st.gain });
-});
+for (const r of document.querySelectorAll('input[data-key]')) {
+  r.addEventListener('input', () => {
+    const key = r.dataset.key;
+    st[key] = Number(r.value);
+    save();
+    sync();
+    win()?.wallpaperPropertyListener.applyUserProperties({ [key]: { value: st[key] } });
+  });
+}
 
 function say(text) {
   $('#msg').textContent = text;

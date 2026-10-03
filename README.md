@@ -209,7 +209,7 @@ Then open <http://localhost:5173/>. The preview shows the live wallpaper scaled 
 window, rendered at your screen's resolution or another one (1080p, 1440p, 4K, ultrawide,
 16:10), with:
 
-- the settings (centrepiece, display, glow, shifts), applied the way Wallpaper Engine
+- the settings (centrepiece, glow strength and size, ink strength, motion, parallax, shifts), applied the way Wallpaper Engine
   applies them;
 - buttons to shift the worldline, click, pause, or form a given kind of ink right now
   (keys S, C, P and 1–4);
@@ -227,7 +227,9 @@ shows what the tubes and ink are doing.
 
 URL parameters:
 
-- Settings: `centre=makise|nixie`, `display=time|date|worldline`, `glow=orange|white`, `shift=0|1`
+- Settings: `centre=makise|time|date|worldline`, `glow=0-100` and `glowSize=0-100` (the
+  centrepiece's glow), `ink=0-100`, `motion=0|1`, `parallax=0|1`, `shift=0|1` (the sliders are
+  50 as designed)
 - Debug only:
   - `now=2026-10-02T10:59:55` fakes the clock
   - `still=8` renders one frame 8 s after start

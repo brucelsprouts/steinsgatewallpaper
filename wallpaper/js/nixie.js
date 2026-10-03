@@ -108,7 +108,8 @@ const Nixie = (() => {
     g.restore();
   }
 
-  function buildTube(G, th, S) {
+  // `spread` scales how far each lit cathode's bloom reaches.
+  function buildTube(G, th, S, spread = 1) {
     const { w, h, Hd, inner } = G;
     const pad = 4;
     const sp = {};
@@ -230,11 +231,11 @@ const Nixie = (() => {
       blurInto(lit, base.c, Hd * 0.045 * S, 0.85);
       sp.lit[ch] = { c: lit, ox: -lp, oy: -lp, res: 1 };
 
-      const bp = Hd * 1.8, br = 0.5;
+      const bp = Hd * 1.8 * Math.max(1, spread), br = 0.5;
       const bbase = sprite(w, h, bp, S, drawGlyph, br);
       const bloom = canvas(bbase.c.width, bbase.c.height);
-      blurInto(bloom, bbase.c, Hd * 0.16 * S * br, 0.7);
-      blurInto(bloom, bbase.c, Hd * 0.55 * S * br, 0.55);
+      blurInto(bloom, bbase.c, Hd * 0.16 * S * br * spread, 0.7);
+      blurInto(bloom, bbase.c, Hd * 0.55 * S * br * spread, 0.55);
       sp.bloom[ch] = { c: bloom, ox: -bp, oy: -bp, res: br };
     }
     return sp;
@@ -378,6 +379,7 @@ const Nixie = (() => {
       this.plinth = o.plinth ?? true;
       this.cx = o.cx; this.cy = o.cy;
       this.master = 1;
+      this.glow = 1; // strength of the bloom, the haze and the streak (1 as designed)
       this.target = ' '.repeat(this.count);
       this.slots = Array.from({ length: this.count }, () => ({ cur: ' ', prev: ' ', at: -1e9 }));
       this.shift = null;
@@ -394,9 +396,9 @@ const Nixie = (() => {
       this.y0 = this.cy - h / 2;
     }
 
-    build(S, themeName) {
+    build(S, themeName, spread = 1) {
       const th = THEMES[themeName] || THEMES.warm;
-      this.sp = buildTube(this.G, th, S);
+      this.sp = buildTube(this.G, th, S, spread);
       this.fr = buildFrame(this.L, th, S, { plinth: this.plinth });
     }
 
@@ -503,7 +505,7 @@ const Nixie = (() => {
       ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < xs.length; i++) add(sp.meshLit, x0 + xs[i], y0, B[i]);
       for (let i = 0; i < xs.length; i++) {
-        for (const [ch, a] of lit.slice(i * 2, i * 2 + 2)) if (sp.bloom[ch]) add(sp.bloom[ch], x0 + xs[i], y0, a);
+        for (const [ch, a] of lit.slice(i * 2, i * 2 + 2)) if (sp.bloom[ch]) add(sp.bloom[ch], x0 + xs[i], y0, a * this.glow);
       }
       ctx.globalCompositeOperation = 'source-over';
       for (let i = 0; i < xs.length; i++) put(sp.front, x0 + xs[i], y0);
@@ -513,10 +515,10 @@ const Nixie = (() => {
       put(fr.sockets, x0, y0);
       ctx.globalCompositeOperation = 'lighter';
       add(fr.socketsLit, x0, y0, avg);
-      add(fr.haze, x0, y0, avg);
+      add(fr.haze, x0, y0, avg * this.glow);
       // The streak breathes a little in length and flares with the tubes.
       const st = fr.streak, sw = st.w * (1 + 0.04 * Math.sin(t / 2.7));
-      ctx.globalAlpha = Math.min(1, STREAK * avg * avg);
+      ctx.globalAlpha = Math.min(1, STREAK * avg * avg * this.glow);
       ctx.drawImage(st.c, ox + (x0 + st.cx - sw / 2) * S, oy + (y0 + st.cy - st.h / 2) * S, sw * S, st.h * S);
       ctx.restore();
     }

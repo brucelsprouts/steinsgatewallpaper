@@ -237,6 +237,9 @@ const Atmos = (() => {
       g.globalCompositeOperation = 'lighter';
       glowSpot(g, X(1720), Y(1130), 420 * S, 300 * S, '150,205,215', 0.32);
       glowSpot(g, X(2330), Y(860), 280 * S, 240 * S, '255,176,120', 0.24);
+      // Fainter ones on the left, beside the centrepiece: warm up high, cool down low.
+      glowSpot(g, X(240), Y(250), 460 * S, 360 * S, '255,176,120', 0.3);
+      glowSpot(g, X(120), Y(1250), 380 * S, 320 * S, '150,205,215', 0.24);
       if (!this.spot) {
         this.spot = canvas(64, 64);
         glowSpot(this.spot.getContext('2d'), 32, 32, 32, 32, '255,196,140', 0.55);

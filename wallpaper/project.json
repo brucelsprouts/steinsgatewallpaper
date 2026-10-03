@@ -11,32 +11,50 @@
         "value": "makise",
         "options": [
           { "label": "Makise Kurisu", "value": "makise" },
-          { "label": "Nixie meter", "value": "nixie" }
-        ]
-      },
-      "display": {
-        "order": 100,
-        "text": "Display",
-        "type": "combo",
-        "value": "time",
-        "options": [
-          { "label": "Time", "value": "time" },
-          { "label": "Date", "value": "date" },
-          { "label": "Worldline", "value": "worldline" }
+          { "label": "Nixie meter: time", "value": "time" },
+          { "label": "Nixie meter: date", "value": "date" },
+          { "label": "Nixie meter: worldline", "value": "worldline" }
         ]
       },
       "glow": {
+        "order": 100,
+        "text": "Glow strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "glowSize": {
         "order": 101,
-        "text": "Glow colour",
-        "type": "combo",
-        "value": "orange",
-        "options": [
-          { "label": "Orange", "value": "orange" },
-          { "label": "White", "value": "white" }
-        ]
+        "text": "Glow size",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "ink": {
+        "order": 102,
+        "text": "Ink strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "motion": {
+        "order": 103,
+        "text": "Makise motion",
+        "type": "bool",
+        "value": true,
+        "condition": "centre.value == 'makise'"
+      },
+      "parallax": {
+        "order": 104,
+        "text": "Cursor parallax",
+        "type": "bool",
+        "value": true
       },
       "shift": {
-        "order": 102,
+        "order": 105,
         "text": "Worldline shifts",
         "type": "bool",
         "value": true
@@ -44,7 +62,9 @@
     }
   },
   "preview": "preview.jpg",
-  "tags": ["Anime"],
+  "tags": [
+    "Anime"
+  ],
   "title": "Divergence Meter",
   "type": "web",
   "visibility": "private"

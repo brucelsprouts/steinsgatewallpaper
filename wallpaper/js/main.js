@@ -21,12 +21,19 @@
   const inkRest = q.has('inkRest') ? Number(q.get('inkRest')) : null;
   let simT = 0;
   const clock = () => new Date(fakeNow != null ? fakeNow + simT * 1000 : Date.now());
-  const theme = () => (Config.get('glow') === 'white' ? 'cold' : 'warm');
+  const theme = () => 'warm'; // the scene's light: always orange (a 'cold' white one exists too)
+  // How far the centrepiece's glow spreads (glowSize 0-100, 50 as designed: half as far to
+  // twice), and how strong the meter's is (glow 0-100, 50 as designed).
+  const spread = () => 2 ** ((Config.get('glowSize') - 50) / 50);
+  const meterGlow = () => Config.get('glow') / 50;
 
+  // The ink's strength: the setting (0-100, 50 as designed) scales its usual gain, or
+  // the one ?inkGain asks for.
+  const inkGain = () => (q.has('inkGain') ? Number(q.get('inkGain')) : Ink.GAIN) * Config.get('ink') / 50;
   const scene = new Scene.Scene(Kit.rng(seed), {
     rest: inkRest != null ? [inkRest, inkRest] : undefined,
     blend: q.get('inkBlend') || undefined,
-    gain: q.has('inkGain') ? Number(q.get('inkGain')) : undefined,
+    gain: inkGain(),
   });
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
   const portrait = new Portrait.Portrait();
@@ -53,12 +60,14 @@
 
   function buildSprites() {
     const makise = centre() === 'makise', f = makise ? Portrait.FOCUS : Scene.FOCUS;
-    meter.build(view.S, theme());
+    meter.glow = meterGlow();
+    meter.build(view.S, theme(), spread());
     if (makise) portrait.build(view.S, theme());
     scene.build(view.S, view, theme(), f);
     smoke.build(view, f);
     light.build(view);
     grunge = Atmos.grunge(view);
+    liftCorners(grunge, 0.6, 0.5);
     lens.build();
     bloom.build(view);
     grain.build(view, makise ? { x: f.x, y: f.y, rx: 520, ry: 640 } : { x: f.x, y: f.y, rx: 560, ry: 230 });
@@ -73,6 +82,24 @@
     }
     g.fillStyle = r;
     g.fillRect(0, 0, W * k, H * k);
+    liftCorners(vignette, 0.55, 0.45);
+  }
+
+  // Ease a darkening layer off in the left-hand corners, so the clockwork and worldlines
+  // beside the centrepiece aren't lost. `top` and `bottom` are how much of it to take
+  // away at the very corner; where the two meet, halfway down the edge, a little goes too.
+  function liftCorners(c, top, bottom) {
+    const g = c.getContext('2d');
+    g.globalCompositeOperation = 'destination-out';
+    for (const [y, amount] of [[0, top], [c.height, bottom]]) {
+      const lift = g.createRadialGradient(0, y, 0, 0, y, c.width * 0.42);
+      lift.addColorStop(0, `rgba(0,0,0,${amount})`);
+      lift.addColorStop(0.5, `rgba(0,0,0,${amount * 0.45})`);
+      lift.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = lift;
+      g.fillRect(0, 0, c.width, c.height);
+    }
+    g.globalCompositeOperation = 'source-over';
   }
 
   function resize() {
@@ -153,14 +180,18 @@
   document.addEventListener('visibilitychange', syncRunning);
 
   Config.onChange((key, v) => {
-    if (key === 'glow' || key === 'centre') buildSprites();
-    else if (key === 'display') controller.setMode(v, elapsed());
+    if (key === 'centre') { controller.setMode(Config.get('display'), elapsed()); buildSprites(); }
+    else if (key === 'glowSize') buildSprites();
+    else if (key === 'glow') meter.glow = meterGlow();
+    else if (key === 'ink') scene.ink.style({ blend: scene.ink.blend, gain: inkGain() });
+    else if (key === 'parallax' && !v) scene.pointer(0, 0);
     if (!running()) render(lastT);
   });
 
   // Lively and Wallpaper Engine forward desktop mouse input to the page.
   if (!cursor) {
     window.addEventListener('pointermove', e => {
+      if (!Config.get('parallax')) return;
       scene.pointer(e.clientX / window.innerWidth * 2 - 1, e.clientY / window.innerHeight * 2 - 1);
     });
   }

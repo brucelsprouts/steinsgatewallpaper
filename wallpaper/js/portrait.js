@@ -39,6 +39,11 @@ const Portrait = (() => {
     cold: { filter: 'saturate(0.8) brightness(0.7) contrast(1.02)', tint: '150,180,255', glow: '176,198,240' },
   };
   const PAD = 0.14; // room around the backlight, a fraction of the picture's size
+  // The backlight from the settings: `glow` (0-100) is its strength, `glowSize` (0-100,
+  // 50 as designed) how far it spreads, from half as far to twice.
+  const glowGain = () => Config.get('glow') / 100;
+  const glowSpread = () => 2 ** ((Config.get('glowSize') - 50) / 50);
+  const moving = () => Config.get('motion');
 
   // How big the shown part of a picture is drawn: design px for each of its own.
   const fitOf = (img, crop) => Math.min(BOX.maxW / img.naturalWidth, BOX.maxH / (img.naturalHeight * crop));
@@ -51,6 +56,8 @@ const Portrait = (() => {
       y: off.y + Math.sin(t * TAU / 7.5) * 5 + Math.sin(t / 3.1 + 1) * 1.2,
     };
   }
+  // The same, held still when the settings turn her motion off.
+  const at = (t, off) => (moving() ? pose(t, off) : { x: off.x, y: off.y });
 
   // The shown part (the top `crop`) of a picture at W x H, graded toward the scene's light.
   function graded(img, crop, W, H, gr) {
@@ -175,10 +182,11 @@ const Portrait = (() => {
       g.drawImage(m, 0, 0);
       g.globalCompositeOperation = 'source-over';
       // Backlight: its silhouette blurred wide, in the light's colour, at quarter size.
-      const k = 0.25, gw = Math.ceil(W * (1 + 2 * PAD) * k), gh = Math.ceil(H * (1 + 2 * PAD) * k);
+      const z = glowSpread(), pad = PAD * Math.max(1, z);
+      const k = 0.25, gw = Math.ceil(W * (1 + 2 * pad) * k), gh = Math.ceil(H * (1 + 2 * pad) * k);
       const glow = canvas(gw, gh), gg = glow.getContext('2d');
-      gg.filter = `blur(${Math.max(2, W * k * 0.04).toFixed(1)}px)`;
-      gg.drawImage(c, W * PAD * k, H * PAD * k, W * k, H * k);
+      gg.filter = `blur(${Math.max(2, W * k * 0.04 * z).toFixed(1)}px)`;
+      gg.drawImage(c, W * pad * k, H * pad * k, W * k, H * k);
       gg.filter = 'none';
       gg.globalCompositeOperation = 'source-in';
       gg.fillStyle = `rgb(${gr.glow})`;
@@ -189,21 +197,21 @@ const Portrait = (() => {
       if (this.rig) {
         sway = this.warp.set(pic, this.rig.images.map(m => cut(m, crop)), this.rig.effects, { size: [sw, sh], fade: BOX.fade });
       }
-      this.sp = { c, glow, w, h, sway };
+      this.sp = { c, glow, pad, w, h, sway };
     }
 
     // A worldline shift (`big`) or a click.
     hit(t, big) { this.hitAt = t; this.big = big; }
 
     // Where she floats at time t (design px from her home).
-    pose(t, off) { return pose(t, off); }
+    pose(t, off) { return at(t, off); }
 
     // Swing her rig along to time t, her depth plane having drifted to `off` (design px)
     // and the cursor being at `cursor` (-1..1, as the scene smooths it): the hair and arms
     // trail her as she floats.
     update(t, off, cursor) {
-      if (!this.rig) return;
-      const p = pose(t, off);
+      if (!this.rig || !moving()) return;
+      const p = at(t, off);
       this.motion.update(t, this.rig.effects, { x: p.x / this.fit, y: p.y / this.fit }, cursor);
     }
 
@@ -216,17 +224,17 @@ const Portrait = (() => {
     draw(ctx, view, t, off) {
       const sp = this.sp;
       if (!sp) return;
-      const S = view.S, p = pose(t, off), w = sp.w, h = sp.h;
+      const S = view.S, p = at(t, off), w = sp.w, h = sp.h, pad = sp.pad;
       const x = BOX.cx - w / 2 + p.x, y = BOX.bottom - h + p.y;
       const X = view.ox + x * S, Y = view.oy + y * S, Wd = w * S, Hd = h * S;
-      const pic = (sp.sway && this.bend(t)) || sp.c;
+      const pic = (sp.sway && moving() && this.bend(t)) || sp.c;
       const age = t - this.hitAt, dur = this.big ? 1.6 : 0.45;
       const tear = age >= 0 && age < dur ? (1 - age / dur) ** 1.5 : 0;
       const flare = age >= 0 ? Math.exp(-age / (this.big ? 0.8 : 0.3)) * (this.big ? 1 : 0.5) : 0;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = Math.min(1, (0.1 + 0.02 * Math.sin(t / 5.1)) * (1 + 3 * flare));
-      ctx.drawImage(sp.glow, X - Wd * PAD, Y - Hd * PAD, Wd * (1 + 2 * PAD), Hd * (1 + 2 * PAD));
+      ctx.globalAlpha = Math.min(1, (0.1 + 0.02 * Math.sin(t / 5.1)) * (1 + 3 * flare) * glowGain());
+      if (ctx.globalAlpha > 0) ctx.drawImage(sp.glow, X - Wd * pad, Y - Hd * pad, Wd * (1 + 2 * pad), Hd * (1 + 2 * pad));
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
       if (tear > 0.02) this.torn(ctx, pic, X, Y, Wd, Hd, t, tear, S);

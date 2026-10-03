@@ -16,14 +16,17 @@ const Scene = (() => {
   function compose() {
     return [
       // ---- Deep clockwork ----
-      new A({ x: 700, y: -330, depth: -0.8, blur: 2.5, res: 0.7, alpha: 0.07, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
+      // A half clock hanging from the top, its lowest numerals beside the centrepiece's
+      // head rather than behind it.
+      new A({ x: 380, y: -300, depth: -0.8, blur: 1.4, res: 0.8, alpha: 0.2, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
         parts: [{ type: 'dial', r: 780, hands: false, track: false, turn: -1 }] }),
-      new O({ kind: 'worldlines', x: 690, y: 1000, width: 1500, height: 200, depth: -0.7, alpha: 0.28, glow: 0.8, breathe: 0.1,
+      new O({ kind: 'worldlines', x: 810, y: 130, width: 1400, height: 170, fade: 0.28, behind: { x: 2000, y: 560, r: 800, soft: 50 }, pinches: [0.33, 0.52, 0.7], depth: -0.7, alpha: 0.28, glow: 0.8, breathe: 0.1,
         pulse: true, seed: 21, op: 'screen' }),
       // The astrolabe: a giant dial whose rings step against each other.
       new A({ x: 2000, y: 560, depth: -0.6, blur: 1.6, res: 0.8, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
         parts: [{ type: 'dial', r: 820, ring24: true }] }),
-      new A({ x: 440, y: 200, depth: -0.55, blur: 1.2, res: 0.85, alpha: 0.1, rx: 0.12, ry: 0.15, seed: 9,
+      // Tucked under the half clock's rim.
+      new A({ x: 150, y: 420, depth: -0.55, blur: 1.2, res: 0.85, alpha: 0.2, rx: 0.12, ry: 0.15, seed: 9,
         parts: [
           { type: 'gear', pitch: 18, teeth: 30, spokes: 4, curved: true },
           { type: 'gear', teeth: 16, spokes: 0, holes: 5, mesh: { to: 0, angle: 0.6 } },
@@ -42,7 +45,8 @@ const Scene = (() => {
       // Akihabara time (UTC+9), upper right.
       new A({ x: 2300, y: 230, depth: 0, blur: 0.5, alpha: 0.14, rx: 0.16, ry: 0.22, roll: -0.15, seed: 5,
         parts: [{ type: 'dial', r: 270, tz: 9 }] }),
-      new A({ x: 250, y: 1215, depth: 0.1, blur: 0.4, alpha: 0.13, rx: 0.08, ry: 0.14, seed: 10,
+      // Down the left edge, clear of the centrepiece.
+      new A({ x: 130, y: 930, depth: 0.1, blur: 0.4, alpha: 0.18, rx: 0.08, ry: 0.14, seed: 10,
         parts: [
           { type: 'gear', pitch: 26, teeth: 34, spokes: 6, curved: true },
           { type: 'gear', teeth: 18, spokes: 4, mesh: { to: 0, angle: -0.7 } },

@@ -1,13 +1,20 @@
 'use strict';
 // The user settings, from: defaults -> URL query -> Lively / Wallpaper Engine.
-//   centre:  makise (a picture, img/makise.png) | nixie (the divergence meter)
-//   display: time | date | worldline (what the nixie meter shows)
-//   glow:    orange | white
-//   shift:   worldline shifts on/off (random every 20-60 min, and on click)
+//   centre:    makise (a picture, img/makise.webp) | time | date | worldline (the nixie
+//              meter, showing that)
+//   glow:      0-100, the centrepiece's glow: Makise's backlight, or the tubes' bloom
+//   glowSize:  0-100, how far that glow spreads (50 as designed)
+//   ink:       0-100, how strong the ink is (50 as designed)
+//   motion:    Makise's hair, arms and breath moving, and her float
+//   parallax:  the scene drifting with the cursor
+//   shift:     worldline shifts on/off (random every 20-60 min, and on click)
+// `display` (what the meter shows) is read from `centre`: time while it's Makise.
 const Config = (() => {
-  const defaults = { centre: 'makise', display: 'time', glow: 'orange', shift: true };
+  const defaults = { centre: 'makise', glow: 50, glowSize: 50, ink: 50, motion: true, parallax: true, shift: true };
   // Lively dropdowns report an index; map them back to our values.
-  const choices = { centre: ['makise', 'nixie'], display: ['time', 'date', 'worldline'], glow: ['orange', 'white'] };
+  const choices = { centre: ['makise', 'time', 'date', 'worldline'] };
+  // Older links and saved settings: `centre=nixie` was the meter, `display` what it showed.
+  const legacy = { nixie: 'time' };
 
   const values = { ...defaults };
   const listeners = [];
@@ -17,8 +24,10 @@ const Config = (() => {
   function coerce(key, v) {
     const d = defaults[key];
     if (typeof d === 'boolean') return v === true || v === 'true' || v === '1' || v === 1;
+    if (typeof d === 'number') return Number.isFinite(Number(v)) ? Math.max(0, Math.min(100, Number(v))) : d;
     if (typeof v === 'number') return choices[key][v] ?? d;
-    return choices[key].includes(String(v)) ? String(v) : d;
+    v = legacy[v] || String(v);
+    return choices[key].includes(v) ? v : d;
   }
 
   function set(key, v) {
@@ -31,6 +40,7 @@ const Config = (() => {
 
   const q = new URLSearchParams(location.search);
   for (const [k, v] of q) if (k in defaults) values[k] = coerce(k, v);
+  if (values.centre === 'time' && ['date', 'worldline'].includes(q.get('display'))) values.centre = q.get('display');
 
   // Lively Wallpaper.
   window.livelyPropertyListener = (name, val) => set(name, val);
@@ -49,7 +59,7 @@ const Config = (() => {
   };
 
   return {
-    get: k => values[k],
+    get: k => (k === 'display' ? (values.centre === 'makise' ? 'time' : values.centre) : values[k]),
     set,
     onChange: fn => listeners.push(fn),
     on: (name, fn) => { actions[name] = fn; },

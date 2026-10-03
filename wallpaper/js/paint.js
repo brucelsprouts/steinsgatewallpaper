@@ -127,6 +127,30 @@ const Paint = (() => {
       const info = {};
       KINDS[this.kind](g, { ...this, color: COLORS[this.color] || this.color, info });
       this.path = info.path || null;
+      if (this.fade > 0) {
+        // Dissolve the left and right ends, so the linework emerges from the dark rather than stopping.
+        const x0 = (hw - this.width / 2) * k, x1 = (hw + this.width / 2) * k;
+        const fg = g.createLinearGradient(x0, 0, x1, 0), f = this.fade;
+        [[0, 0], [f * 0.5, 0.35], [f, 1], [1 - f, 1], [1 - f * 0.5, 0.35], [1, 0]]
+          .forEach(([at, op]) => fg.addColorStop(at, `rgba(0,0,0,${op})`));
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalCompositeOperation = 'destination-in';
+        g.fillStyle = fg;
+        g.fillRect(0, 0, c.width, c.height);
+        g.globalCompositeOperation = 'source-over';
+      }
+      if (this.behind) {
+        // Fade out inside a circle (design px), so the linework seems to pass behind a dial.
+        const { x, y, r, soft = 60 } = this.behind, cx = (hw + x - this.x) * k, cy = (hh + y - this.y) * k;
+        const bg = g.createRadialGradient(cx, cy, Math.max(0, r - soft) * k, cx, cy, (r + soft) * k);
+        bg.addColorStop(0, 'rgba(0,0,0,1)');
+        bg.addColorStop(1, 'rgba(0,0,0,0)');
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalCompositeOperation = 'destination-out';
+        g.fillStyle = bg;
+        g.fillRect(0, 0, c.width, c.height);
+        g.globalCompositeOperation = 'source-over';
+      }
       let out = c;
       if (this.blur > 0) {
         out = canvas(c.width, c.height);

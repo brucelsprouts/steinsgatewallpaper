@@ -979,5 +979,5 @@ const Ink = (() => {
     }
   }
 
-  return { Field, ZONES, KINDS, INKS, MAX, MIN, NEAR, state };
+  return { Field, ZONES, KINDS, INKS, MAX, MIN, NEAR, GAIN, state };
 })();
