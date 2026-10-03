@@ -1,8 +1,9 @@
-// Behaviour checks for the display controller: node tools/test.js
+// Behaviour checks for the display controller, the ink, the light and Makise's rig: node tools/test.js
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
+const zlib = require('zlib');
 
 function load(settings) {
   const values = { display: 'time', glow: 'orange', shift: true, ...settings };
@@ -336,56 +337,245 @@ test('light: its pool stays off the centrepiece and the shafts fade before it', 
   }
 });
 
-function loadPortrait() {
-  const ctx = { Math, Promise, Sway: { Warp: class {} } };
+// ---------- Makise's rig: its springs, the rig shipped for her, and what it does ----------
+
+function loadRig() {
+  const ctx = { Math, Promise };
   vm.createContext(ctx);
-  const src = ['kit.js', 'portrait.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
-  vm.runInContext(src + ';this.Portrait = Portrait;', ctx);
+  const src = ['kit.js', 'rig.js', 'portrait.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
+  vm.runInContext(src + ';this.Rig = Rig; this.Portrait = Portrait;', ctx);
   return ctx;
 }
 
-// The hair over a run where the body moves 25 px to the left at 5 s (`at(t)`, by
-// default the way the centrepiece's depth plane follows a flick of the cursor), stepped
-// at `fps`.
-function swing(fps, at) {
-  const p = new (loadPortrait().Portrait.Portrait)();
+const IMG = path.join(__dirname, '../wallpaper/img');
+// The rig beside makise.webp, as the wallpaper reads it.
+function shippedRig(Rig) {
+  let desc = null;
+  vm.runInNewContext(fs.readFileSync(path.join(IMG, 'makise-rig.js'), 'utf8'), { Rig: { add: d => { desc = d; } } });
+  return Rig.normalize(desc);
+}
+// A WebP's size, from its header.
+function webpSize(file) {
+  const b = fs.readFileSync(file), kind = b.toString('ascii', 12, 16);
+  if (kind === 'VP8X') return [1 + b.readUIntLE(24, 3), 1 + b.readUIntLE(27, 3)];
+  if (kind === 'VP8L') { const v = b.readUInt32LE(21); return [1 + (v & 0x3fff), 1 + ((v >> 14) & 0x3fff)]; }
+  return [b.readUInt16LE(26) & 0x3fff, b.readUInt16LE(28) & 0x3fff];
+}
+// An 8-bit PNG (grey, RGB, or either with alpha): { width, height, channels, data }.
+function readPNG(file) {
+  const b = fs.readFileSync(file), idat = [];
+  let pos = 8, width, height, channels;
+  while (pos < b.length) {
+    const len = b.readUInt32BE(pos), type = b.toString('ascii', pos + 4, pos + 8), d = b.subarray(pos + 8, pos + 8 + len);
+    if (type === 'IHDR') {
+      [width, height, channels] = [d.readUInt32BE(0), d.readUInt32BE(4), { 0: 1, 2: 3, 4: 2, 6: 4 }[d[9]]];
+      assert.ok(d[8] === 8 && channels && !d[12], `${path.basename(file)} is not a plain 8-bit PNG`);
+    }
+    if (type === 'IDAT') idat.push(d);
+    pos += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat)), n = channels, row = width * n, out = Buffer.alloc(height * row);
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (row + 1)], o = y * row, l = y * (row + 1) + 1;
+    for (let x = 0; x < row; x++) {
+      const a = x >= n ? out[o + x - n] : 0, up = y ? out[o - row + x] : 0, c = x >= n && y ? out[o - row + x - n] : 0;
+      let v = raw[l + x];
+      if (f === 1) v += a;
+      else if (f === 2) v += up;
+      else if (f === 3) v += (a + up) >> 1;
+      else if (f === 4) { const q = a + up - c, pa = Math.abs(q - a), pb = Math.abs(q - up), pc = Math.abs(q - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? up : c; }
+      out[o + x] = v & 255;
+    }
+  }
+  return { width, height, channels, data: out };
+}
+// Sampling a rig's masks the way the GPU does (bilinear): `mask(map, [x, y])` with x and y
+// in the picture's px gives that map's red, green and blue there (0..1).
+function masks(rig) {
+  const maps = rig.maps.map(m => readPNG(path.join(IMG, m))), [W, H] = rig.size;
+  return (m, q) => {
+    const M = maps[m], x = Math.min(M.width - 1.001, Math.max(0, q[0] * M.width / W - 0.5));
+    const y = Math.min(M.height - 1.001, Math.max(0, q[1] * M.height / H - 0.5));
+    const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+    const v = (ii, jj, c) => M.data[(jj * M.width + ii) * M.channels + c] / 255;
+    return [0, 1, 2].map(c => (v(i, j, c) * (1 - fx) + v(i + 1, j, c) * fx) * (1 - fy) + (v(i, j + 1, c) * (1 - fx) + v(i + 1, j + 1, c) * fx) * fy);
+  };
+}
+
+// The hair (a sway) and the arms (swings) of the shipped rig over a run where she moves
+// 25 design px to the left at 5 s (`at(t)`, by default the way her depth plane follows a
+// flick of the cursor), stepped at `fps`. How far each has swung, in the picture's px.
+function trail(fps, at) {
+  const { Rig, Portrait } = loadRig(), rig = shippedRig(Rig), m = new Rig.Motion();
+  const fit = Portrait.fitOf({ naturalWidth: rig.size[0], naturalHeight: rig.size[1] }, 0.6);
+  const hair = rig.effects.find(e => e.kind === 'sway'), arms = rig.effects.filter(e => e.kind === 'swing');
   const out = [];
   let cam = -1, last = 0;
   for (let i = 0; i <= 15 * fps; i++) {
     const t = i / fps;
     cam += ((t < 5 ? -1 : 1) - cam) * (1 - Math.exp(-(t - last) / 0.78));
     last = t;
-    p.update(t, { x: at ? at(t) : -cam * 12.6, y: 0 });
-    out.push({ t, ...p.hair.off(), arms: p.arms.map(a => a.off().x) });
+    m.update(t, rig.effects, { x: (at ? at(t) : -cam * 12.6) / fit, y: 0 });
+    out.push({ t, ...m.spring(hair).off(), arms: arms.map(a => m.spring(a).off().x) });
   }
   return out;
 }
 
-test('portrait: the hair trails a move, swings back and settles', () => {
-  const run = swing(30), at = (a, b) => run.filter(s => s.t >= a && s.t < b).map(s => s.x);
-  const before = Math.max(...at(4, 5)), trail = Math.max(...at(5, 6.5));
-  assert.ok(trail > before + 6, `trailed ${trail.toFixed(1)} px (was ${before.toFixed(1)})`);
+test('rig: the hair trails a move, swings back and settles', () => {
+  const run = trail(30), at = (a, b) => run.filter(s => s.t >= a && s.t < b).map(s => s.x);
+  const before = Math.max(...at(4, 5)), behind = Math.max(...at(5, 6.5));
+  assert.ok(behind > before + 5, `trailed ${behind.toFixed(1)} px (was ${before.toFixed(1)})`);
   assert.ok(Math.min(...at(5.5, 8)) < before, 'never swung back');
   const settled = at(10, 15).map(x => Math.abs(x - before));
-  assert.ok(Math.max(...settled) < 8, `still swinging ${Math.max(...settled).toFixed(1)} px from rest`);
+  assert.ok(Math.max(...settled) < 6.5, `still swinging ${Math.max(...settled).toFixed(1)} px from rest`);
 });
 
-test('portrait: the arms trail a move too, more gently than the hair, and settle', () => {
-  const run = swing(30), during = run.filter(s => s.t >= 5 && s.t < 7), after = run.filter(s => s.t >= 11);
+test('rig: the arms trail a move too, more gently than the hair, and settle', () => {
+  const run = trail(30), during = run.filter(s => s.t >= 5 && s.t < 7), after = run.filter(s => s.t >= 11);
   const hair = Math.max(...during.map(s => Math.abs(s.x)));
   for (const side of [0, 1]) {
     const arm = Math.max(...during.map(s => Math.abs(s.arms[side])));
-    assert.ok(arm > 1 && arm < hair, `arm ${side} swung ${arm.toFixed(1)} px (hair ${hair.toFixed(1)})`);
+    assert.ok(arm > 0.8 && arm < hair, `arm ${side} swung ${arm.toFixed(1)} px (hair ${hair.toFixed(1)})`);
     const rest = Math.max(...after.map(s => Math.abs(s.arms[side])));
-    assert.ok(rest < 4, `arm ${side} still ${rest.toFixed(1)} px out`);
+    assert.ok(rest < 3.3, `arm ${side} still ${rest.toFixed(1)} px out`);
   }
 });
 
-test('portrait: the hair moves the same at any frame rate', () => {
+test('rig: the hair moves the same at any frame rate', () => {
   const glide = t => 12.6 - 25.2 * (0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, (t - 5) / 0.8))));
-  const a = swing(30, glide), b = swing(60, glide).filter((s, i) => i % 2 === 0);
+  const a = trail(30, glide), b = trail(60, glide).filter((s, i) => i % 2 === 0);
   const worst = Math.max(...a.map((s, i) => Math.hypot(s.x - b[i].x, s.y - b[i].y)));
-  assert.ok(worst < 0.5, `30 and 60 fps differ by ${worst.toFixed(2)} px`);
+  assert.ok(worst < 0.4, `30 and 60 fps differ by ${worst.toFixed(2)} px`);
+});
+
+test('rig: a rig is checked and completed as it loads', () => {
+  const { Rig } = loadRig(), K = Rig.KINDS;
+  const r = Rig.normalize({ size: [10, 20], maps: ['a.png'], effects: [
+    { kind: 'hold', mask: [0, 0] }, { kind: 'hold', mask: [0, 1] }, { kind: 'spin', mask: [0, 2] },
+    { kind: 'sway', name: 'Hair', gain: 99, mask: [0, 1] }, { kind: 'wave', mask: [3, 0] }, { kind: 'swing', pivot: [5, 'x'], on: false },
+  ] });
+  assert.deepStrictEqual([...r.effects.map(e => e.kind)], ['hold', 'sway', 'wave', 'swing'], 'unknown kinds and a second hold dropped');
+  const [, sway, wave, swing] = r.effects;
+  assert.strictEqual(sway.gain, K.sway.params.gain.max, 'kept in range');
+  assert.strictEqual(sway.hz, K.sway.params.hz.v, 'defaults filled in');
+  assert.ok(sway.hold && !Rig.make('parallax').hold, 'sway leaves held areas be, parallax carries them');
+  assert.strictEqual(wave.mask, null, 'a mask on a map it does not have');
+  assert.deepStrictEqual([...swing.pivot], [0, 0]);
+  assert.strictEqual(swing.on, false);
+  const many = Rig.normalize({ maps: [], effects: Array.from({ length: 20 }, () => ({ kind: 'wave' })) });
+  assert.strictEqual(many.effects.length, Rig.MAX);
+});
+
+test('rig: an effect switched off moves nothing', () => {
+  const { Rig } = loadRig(), rig = shippedRig(Rig), m = new Rig.Motion();
+  for (let t = 0; t <= 20; t += 1 / 30) m.update(t, rig.effects, { x: Math.sin(t) * 9, y: 0 }, { x: 0.8, y: -0.5 });
+  const on = m.values(20, rig.effects);
+  assert.ok(on.every(Number.isFinite));
+  for (const e of rig.effects) e.on = false;
+  const off = m.values(20, rig.effects);
+  rig.effects.forEach((e, i) => {
+    const moves = e.kind === 'swing' ? [off[i * 8 + 2]] : [...off.slice(i * 8, i * 8 + 3), off[i * 8 + 4]];
+    assert.ok(moves.every(v => v === 0), `${e.name} still moves`);
+  });
+});
+
+test('rig: the rig shipped for makise.webp fits it, and its shader reads every mask', () => {
+  const { Rig } = loadRig(), rig = shippedRig(Rig), size = webpSize(path.join(IMG, 'makise.webp'));
+  assert.deepStrictEqual([...rig.size], size, 'made for a picture of another size');
+  assert.strictEqual(rig.effects.filter(e => e.kind === 'hold').length, 1);
+  for (const m of rig.maps) {
+    const png = readPNG(path.join(IMG, m));
+    assert.ok(Math.abs(png.width / png.height / (size[0] / size[1]) - 1) < 0.02, `${m} is ${png.width}x${png.height}`);
+  }
+  const src = Rig.fragment(rig.effects, rig.maps.length);
+  for (const e of rig.effects) assert.ok(e.mask && src.includes(`a${e.mask[0]}.${'rgb'[e.mask[1]]}`), `${e.name} has no mask`);
+  const count = s => src.split(s).length - 1;
+  assert.strictEqual(count('d += turn('), rig.effects.filter(e => e.kind === 'swing').length);
+  assert.strictEqual(count('d += ') - count('d += turn('), rig.effects.filter(e => !['hold', 'swing'].includes(e.kind)).length);
+});
+
+// The shipped rig at its strongest: the springs as far as 3 minutes of hard flicks of the
+// cursor ever take them, gusting, breathing in, the cursor in a corner.
+function strongest(Rig, rig, sign) {
+  const m = new Rig.Motion(), most = new Map();
+  let cam = { x: 0, y: 0 }, aim = { x: 1, y: 1 };
+  for (let i = 0; i <= 30 * 180; i++) {
+    const t = i / 30;
+    if (i % 120 === 0) aim = { x: -aim.x, y: Kit_hash(i) * 2 - 1 };
+    const k = 1 - Math.exp(-1 / 30 / 0.78);
+    cam = { x: cam.x + (aim.x - cam.x) * k, y: cam.y + (aim.y - cam.y) * k };
+    m.update(t, rig.effects, { x: -cam.x * 10.4 + Math.sin(t / 9.7) * 2.5, y: -cam.y * 7.3 + Math.sin(t * 0.84) * 4 }, cam);
+    for (const e of rig.effects) {
+      if (e.kind !== 'sway' && e.kind !== 'swing') continue;
+      const o = m.spring(e).off(), was = most.get(e) || [0, 0];
+      most.set(e, [Math.max(was[0], Math.abs(o.x)), Math.max(was[1], Math.abs(o.y))]);
+    }
+  }
+  for (const [e, [x, y]] of most) {
+    const s = m.spring(e), toward = v => Math.atanh(Math.min(0.999, v / e.max)) * e.max / Math.max(1e-3, e.gain);
+    s.x = s.bx + sign * toward(x);
+    s.y = s.by + sign * toward(y);
+  }
+  m.cursor = { x: sign, y: sign };
+  m.blow(0);
+  return m;
+}
+const Kit_hash = i => ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1;
+
+test('rig: at their strongest the hair, arms and waves never move what is held', () => {
+  const { Rig } = loadRig(), rig = shippedRig(Rig), mask = masks(rig);
+  const hold = rig.effects.find(e => e.kind === 'hold');
+  const heldAt = q => mask(hold.mask[0], q)[hold.mask[1]];
+  // Her face, the shirt beside the long lock and under it, the tie, belt, shorts and both
+  // thighs right up to the coat: all held.
+  const body = { face: [418, 190], eye: [454, 138], shirt: [380, 450], 'shirt by the lock': [474, 330],
+    'shirt below the lock': [490, 470], tie: [400, 500], belt: [400, 640], shorts: [400, 700],
+    'left thigh by the coat': [279, 820], 'right thigh by the coat': [539, 800] };
+  for (const [name, q] of Object.entries(body)) assert.ok(heldAt(q) > 0.99, `${name} is held only ${heldAt(q).toFixed(2)}`);
+  for (const sign of [1, -1]) {
+    const m = strongest(Rig, rig, sign);
+    for (const e of rig.effects) e.on = e.hold !== false; // breathing and parallax may carry the body
+    for (const ph of [0, 2.1, 4.2]) {
+      for (const e of rig.effects) if (e.kind === 'wave') m.waves.set(e, { ph, drift: ph });
+      const vals = m.values(2, rig.effects);
+      for (let y = 0; y < rig.size[1] * 0.6; y += 4) {
+        for (let x = 0; x < rig.size[0]; x += 4) {
+          if (heldAt([x, y]) < 0.999) continue;
+          const d = Rig.push(rig.effects, vals, mask, [x, y]);
+          assert.ok(Math.hypot(d[0], d[1]) < 0.02, `held ${x},${y} moved ${d.map(v => v.toFixed(2))}`);
+        }
+      }
+    }
+  }
+});
+
+test('rig: at its strongest nothing folds over or tears, and the shader finds every pixel', () => {
+  const { Rig } = loadRig(), rig = shippedRig(Rig), mask = masks(rig), W = rig.size[0], H = Math.round(rig.size[1] * 0.6);
+  for (const sign of [1, -1]) {
+    const m = strongest(Rig, rig, sign);
+    for (const ph of [0, 1.6, 3.1, 4.7]) {
+      for (const e of rig.effects) if (e.kind === 'wave') m.waves.set(e, { ph, drift: ph });
+      const vals = m.values(2, rig.effects), s = 3, gw = Math.floor(W / s), gh = Math.floor(H / s), D = new Float32Array(gw * gh * 2);
+      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) D.set(Rig.push(rig.effects, vals, mask, [i * s, j * s]), (j * gw + i) * 2);
+      // Where the picture is pushed, it must stay the right way round: a fold would draw
+      // some of it twice and lose what's beside it.
+      for (let j = 1; j < gh - 1; j++) {
+        for (let i = 1; i < gw - 1; i++) {
+          const o = (j * gw + i) * 2, r = gw * 2;
+          const det = (1 + (D[o + 2] - D[o - 2]) / (2 * s)) * (1 + (D[o + r + 1] - D[o - r + 1]) / (2 * s))
+            - (D[o + r] - D[o - r]) / (2 * s) * (D[o + 3] - D[o - 1]) / (2 * s);
+          assert.ok(det > 0.15, `folds at ${i * s},${j * s} (${det.toFixed(2)})`);
+        }
+      }
+      for (let y = 0; y < H; y += 6) {
+        for (let x = 0; x < W; x += 6) {
+          const q = Rig.source(rig.effects, vals, mask, [x, y]), d = Rig.push(rig.effects, vals, mask, q);
+          const miss = Math.hypot(q[0] + d[0] - x, q[1] + d[1] - y);
+          assert.ok(miss < 1.5, `the shader misses ${x},${y} by ${miss.toFixed(2)} px`);
+        }
+      }
+    }
+  }
 });
 
 process.exitCode = failures ? 1 : 0;

@@ -73,36 +73,78 @@ silhouette) stands in. If no picture loads at all, the nixie meter takes its pla
 
 `makise.webp` is rigged, so only the parts that should move do:
 
-- her **hair** sways on a layer of its own: a little all over, more on the bangs, most
-  down the long lock. It swings in a breeze that now and then gusts, and trails behind
-  when she drifts with the cursor;
+- her **hair** sways: a little all over, more on the bangs, most down the long lock and
+  the loose ends, hardly at all where it rests on her shoulders. It swings in a breeze
+  that now and then gusts, trails behind when she drifts with the cursor, and ripples;
 - her **arms** swing gently from the shoulders inside her **jacket**, whose loose cuffs
   and hem, hanging away from her body, flutter a little more;
-- she **breathes**, softly: her shoulders rise a pixel or so and her arms ease out.
+- she **breathes**, softly: her head and shoulders rise a pixel or so;
+- her **head** sits a little nearer than the rest, so it shifts a touch more with the cursor.
 
-Her face, shirt and legs never bend. The rig is three pictures beside `makise.webp`:
+Her face, eyes, shirt, tie, belt, shorts and legs never bend.
 
-| File | What it is |
-| --- | --- |
-| `makise-layers.png` | The moving layers: red the hair, green the jacket with the arms and hand in it, blue what's filled in beneath them |
-| `makise-under.webp` | The picture with the hair and jacket lifted off and the gap filled from around it: what shows where they swing aside |
-| `makise-sway.png` | How far each part moves: red the hair, green the arms swinging from the shoulders, blue how loosely the cloth hangs |
+It works the way Wallpaper Engine animates a picture with its Shake, Water waves and
+Depth parallax effects and its puppet warp's spring bones: nothing is cut out of the
+picture and nothing has to be filled in behind. Each effect pushes the pixels of the one
+picture by as much as was painted for it, and the picture around a moving part stretches
+and squeezes to follow over the soft edge of what was painted. So nothing can open a gap,
+nothing is dragged along by a lock of hair, and what is painted **Hold still** stays put.
 
-Its entry in `SOURCES` (in `wallpaper/js/portrait.js`) also says, in the picture's
-pixels, where the shoulders are, how long the arms are and over which rows the breath
-eases off. `HAIR`, `ARMS` and `BREATH` at the top of `portrait.js` set how much
-everything moves.
+The rig is `makise-rig.js` beside `makise.webp`, with the masks it names
+(`makise-rig-0.png` and so on, three masks to a picture: red, green and blue, at half
+the picture's size). A picture's rig is always `<its name>-rig.js` beside it, and it
+says the size of the picture it was made for, so a rig never lands on another picture.
 
-It all runs on the GPU (WebGL, `wallpaper/js/sway.js`). Without WebGL, or where the
+#### The rig editor
+
+Paint how she moves, much as you paint effect masks in Wallpaper Engine:
+
+```bash
+node tools/serve.js
+```
+
+and open <http://localhost:5173/tools/rig.html> (or **Rig editor** in the preview).
+
+- On the left, her **effects**. Click one to paint it and set it up, ● to switch it off
+  and on; add more below:
+  - **Sway**: trails behind as she drifts and blows in the breeze, on a spring
+    (strength, wind, stiffness, damping, limit);
+  - **Swing**: the same, but turning about a pivot you drag onto the picture (an arm in
+    its sleeve);
+  - **Waves**: ripples running across it (strength, length, speed, direction, how much
+    stronger in gusts, how far out of step neighbouring strands run);
+  - **Breathe**: rises and falls with each breath (strength, direction, period);
+  - **Parallax**: shifts with the cursor, as if nearer (or, with a depth below 0, farther);
+  - **Hold still**: what must never bend. Sway, swing and waves leave it be; breathing
+    and parallax still carry it, whole. Each effect can be told to ignore it.
+- Paint where the chosen effect works: brighter is stronger. **Paint**, **Erase** and
+  **Smooth** brushes, with size, strength, softness and opacity; fill, clear, invert or
+  smooth the whole mask. Its mask shows over the picture, in its colour, moving with it;
+  the picture holds still while you paint, so the brush lands where you see it.
+- It moves on the page just as it will on the desktop: drag the cursor pad to see her
+  drift and her hair trail and the parallax, **Wander** to have the cursor wander about,
+  **Flick** to throw it across, **Gust** for a gust of wind, at ¼× to 2× speed.
+- **Save** writes the rig beside the picture (only through `tools/serve.js`; elsewhere
+  **Download** gives you the files in a zip). Undo and redo go back 100 steps.
+
+Keys: B paint, E erase, S smooth, `[` `]` brush size (with Shift, softness), 1–9 and 0
+strength, Alt+click picks up the strength under the brush, M mask, Space play, F fit,
+G gust, W wander, ↑ ↓ another effect, wheel zoom, right-drag pan, Ctrl+Z undo,
+Ctrl+Shift+Z redo, Ctrl+S save.
+
+Soft edges matter: where a mask goes from moving to still, the picture between stretches,
+so the soft edge should be at least as wide as the part moves far (a hard edge folds
+the picture over itself, which shows as a seam). `node tools/test.js` checks the rig beside
+`makise.webp` for that: at its strongest, nothing held moves and nothing folds.
+
+It all runs on the GPU (WebGL, `wallpaper/js/rig.js`). Without WebGL, or where the
 browser treats a local picture as foreign (it can under `file://`), the picture is drawn
 whole and holds still apart from floating.
 
-The rig is made by `python tools/swaymap.py` from the colours of the hair and jacket
-inside regions placed (and, for the long lock, traced) by hand for this picture, so it
-fits this picture only; rig pictures whose proportions don't match it are ignored. If
-you change the picture, redo the rig (move the regions in `swaymap.py`, run it again
-and touch the results up in any paint program: crisp edges on the layers, soft sway),
-or remove `rig` from its entry in `SOURCES`.
+The starting rig was made by `python tools/rigmap.py` from the colours of the hair and
+jacket inside regions placed (and, for the long lock, traced) by hand for this picture,
+then the editor takes over. Running `rigmap.py` again starts the rig over. For another
+picture, start a rig in the editor: it opens with just a **Hold still** to paint.
 
 ## How it behaves
 
@@ -119,9 +161,10 @@ or remove `rig` from its entry in `SOURCES`.
   - in Worldline mode, triggers a full shift.
 - **Moving the mouse** gives parallax: the deep clockwork drifts with the cursor while the
   nearer layers and the centrepiece move against it.
-- **Makise** floats in place, bobbing gently, and breathes. Her hair sways in a breeze
-  that now and then gusts and trails behind her as she drifts with the cursor; her arms
-  swing a little in her jacket, its loose cuffs fluttering.
+- **Makise** floats in place, bobbing gently, and breathes. Her hair sways and ripples in
+  a breeze that now and then gusts and trails behind her as she drifts with the cursor;
+  her arms swing a little in her jacket, its loose cuffs fluttering, and her head shifts a
+  touch more than the rest with the cursor.
 - With **Worldline shifts** off, nothing shifts and clicks do nothing.
 - **Ink** forms on its own every few seconds, a dozen or so at a time: an ink blot
   spreading from the drops that start it, a patch of grungy texture, a splash with its
@@ -147,8 +190,8 @@ or remove `rig` from its entry in `SOURCES`.
   (every fourth frame once it has formed); the whole frame takes a few milliseconds at
   2560×1440.
 - The bloom works on an eighth-size copy of the frame and the grain on a half-size one.
-- Makise's sway is one small WebGL draw a frame (all three layers in one pass), at the
-  size she is shown.
+- Makise's rig is one small WebGL draw a frame (every effect in one pass), at the size
+  she is shown.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
 - Rendering stops entirely while the wallpaper is paused or hidden.
 - It renders at each monitor's own resolution. The design is 2560×1440 and scales to fit,
@@ -200,13 +243,15 @@ Tools (the screenshot and recording tools need `tools/serve.js` running):
 
 - `tools/preview.html`: the preview above (the repo root opens it)
 - `node tools/test.js`: behaviour checks for the display and shifts, the ink's schedule and
-  motion, where the light comes from, and Makise's springs
+  motion, where the light comes from, and Makise's rig: its springs, and that at its
+  strongest it never moves what's held or folds the picture over
 - `tools/ink.html`: elements of ink in isolation, at rest, forming or dissolving, for tuning
 - `tools/shoot.sh <page> <out.png> [query]`: headless Chrome screenshot
 - `tools/record.html`: steps the wallpaper frame by frame and saves the frames to
   `shots/frames/` (encode them with ffmpeg)
-- `python tools/swaymap.py`: rigs `img/makise.webp`: its moving layers, what's under
-  them and how far each part sways (needs Pillow)
+- `tools/rig.html`: the rig editor (see [The rig editor](#the-rig-editor))
+- `python tools/rigmap.py`: makes the starting rig for `img/makise.webp` (needs Pillow,
+  NumPy and SciPy)
 - `python tools/package.py`: Lively zip
 
 Code layout (`wallpaper/js`):
@@ -216,8 +261,8 @@ Code layout (`wallpaper/js`):
 | `kit.js` | Noise, easing, canvas helpers |
 | `config.js` | Settings from the URL, Lively and Wallpaper Engine |
 | `nixie.js` | The tubes: glyphs, glass, mesh, glow, walnut base, streak, scramble and flash |
-| `portrait.js` | The Makise centrepiece: loading, grading, feathering, backlight, float, breath, hair and arm springs, glitch |
-| `sway.js` | Brings the rigged Makise picture to life in WebGL: hair, jacket and body as separate layers |
+| `portrait.js` | The Makise centrepiece: loading the picture and its rig, grading, feathering, backlight, float, glitch |
+| `rig.js` | Brings a rigged picture to life in WebGL: effects painted onto the one picture (sway, swing, waves, breathing, parallax, hold), their springs and the breeze |
 | `mech.js` | Dials, hands, gears, escapement; 3D tilt; stepped motion |
 | `paint.js` | Drafting marks, the worldline diagram and its signal, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |

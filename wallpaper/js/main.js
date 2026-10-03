@@ -121,7 +121,7 @@
     controller.tick(t);
     meter.update(t);
     scene.update(t);
-    portrait.update(t, scene.meterOffset(t));
+    portrait.update(t, scene.meterOffset(t), scene.meterCam);
     light.update(t);
   }
 
