@@ -29,30 +29,39 @@
     gain: q.has('inkGain') ? Number(q.get('inkGain')) : undefined,
   });
   const meter = new Nixie.Meter({ ...Scene.METER, aspect: q.has('aspect') ? Number(q.get('aspect')) : undefined });
+  const portrait = new Portrait.Portrait();
   const controller = new Display.Controller(meter, clock);
   const smoke = new Atmos.Smoke(), light = new Atmos.Light(Kit.rng(seed + 7)), lens = new Atmos.LensDust();
+  const grain = new Atmos.Grain(), bloom = new Atmos.Bloom();
   smoke.cam = light.cam = scene.dust.cam; // they drift with the near air
   scene.dust.beam = (x, y, t) => light.beamAt(x, y, t); // dust glints in the light shafts
-  // Clocks spin on every shift and click; a real worldline shift also throws fresh ink
-  // and a burst of leaked light.
+  // Clocks spin on every shift and click, and the picture flickers; a real worldline
+  // shift also tears the picture, throws fresh ink and a burst of leaked light.
   controller.onShift = (t, worldline) => {
     scene.shifts.push(t);
+    portrait.hit(t, worldline);
     if (worldline) { scene.ink.shift(t); light.flare(t); }
   };
   if (q.get('worldline')) controller.worldline = q.get('worldline'); // debug: pin the boot worldline
   if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.settle(); }
 
-  let view, vignette, grunge, grain;
+  // The centrepiece showing: the picture, unless the settings say the meter or the
+  // picture can't be loaded.
+  const centre = () => (Config.get('centre') === 'makise' && portrait.ok !== false ? 'makise' : 'nixie');
+
+  let view, vignette, grunge;
 
   function buildSprites() {
+    const makise = centre() === 'makise', f = makise ? Portrait.FOCUS : Scene.FOCUS;
     meter.build(view.S, theme());
-    scene.build(view.S, view, theme());
-    const hot = { x: Scene.METER.cx, y: Scene.METER.cy };
-    smoke.build(view, hot);
+    if (makise) portrait.build(view.S, theme());
+    scene.build(view.S, view, theme(), f);
+    smoke.build(view, f);
     light.build(view);
     grunge = Atmos.grunge(view);
     lens.build();
-    grain = Atmos.grain(view, { ...hot, rx: 560, ry: 230 });
+    bloom.build(view);
+    grain.build(view, makise ? { x: f.x, y: f.y, rx: 520, ry: 640 } : { x: f.x, y: f.y, rx: 560, ry: 230 });
     // Vignette at quarter resolution with an eased falloff.
     const k = 0.25, W = view.W, H = view.H;
     vignette = Kit.canvas(W * k, H * k);
@@ -88,21 +97,22 @@
     ctx.fillRect(0, 0, view.W, view.H);
     scene.drawBehind(ctx, view, t, now);
     const m = scene.meterOffset(t);
-    meter.draw(ctx, { ...view, ox: view.ox + m.x * view.S, oy: view.oy + m.y * view.S }, t);
+    if (centre() === 'makise') portrait.draw(ctx, view, t, m);
+    else meter.draw(ctx, { ...view, ox: view.ox + m.x * view.S, oy: view.oy + m.y * view.S }, t);
     scene.drawFront(ctx, view, t, now);
-    // Light pooling on the clockwork, shafts of light and a haze of smoke, then the
-    // textured border and the vignette. Over those, as if on the film and the lens:
-    // light leaks, dust and grain (which also hides 8-bit banding in the dark gradients).
+    // Light pooling on the clockwork, shafts of light and a haze of smoke, a bloom on
+    // everything bright, then the textured border and the vignette. Over those, as if on
+    // the film and the lens: light leaks, dust and grain (which also hides 8-bit banding
+    // in the dark gradients).
     light.draw(ctx, view, t, 'hot');
     light.draw(ctx, view, t, 'rays');
     smoke.draw(ctx, view, t);
+    bloom.draw(ctx, cv, view);
     ctx.drawImage(grunge, 0, 0, view.W, view.H);
     ctx.drawImage(vignette, 0, 0, view.W, view.H);
     light.draw(ctx, view, t, 'leak');
     lens.draw(ctx, view, t);
-    ctx.globalCompositeOperation = 'difference';
-    ctx.drawImage(grain, 0, 0, view.W, view.H);
-    ctx.globalCompositeOperation = 'source-over';
+    grain.draw(ctx, view);
   }
 
   function step(t) {
@@ -111,6 +121,7 @@
     controller.tick(t);
     meter.update(t);
     scene.update(t);
+    portrait.update(t, scene.meterOffset(t));
     light.update(t);
   }
 
@@ -142,7 +153,7 @@
   document.addEventListener('visibilitychange', syncRunning);
 
   Config.onChange((key, v) => {
-    if (key === 'glow') buildSprites();
+    if (key === 'glow' || key === 'centre') buildSprites();
     else if (key === 'display') controller.setMode(v, elapsed());
     if (!running()) render(lastT);
   });
@@ -159,15 +170,25 @@
 
   resize();
   controller.boot(0);
+  // The picture loads alongside; once it's in, it's baked (or, if it can't be had, the
+  // meter takes its place). Stills and recordings wait for it.
+  const settled = portrait.load().then(ok => {
+    if (!view) return;
+    if (ok && centre() === 'makise') portrait.build(view.S, theme());
+    else if (!ok && Config.get('centre') === 'makise') buildSprites();
+  });
   if (manual) {
-    render(0);
+    settled.then(() => render(0));
   } else if (still != null) {
     // Deterministic single frame for screenshots: simulate at 30 fps up to `still`.
-    for (let t = 0; t <= still + 1e-6; t += 1 / 30) step(t);
-    render(still);
-    document.title += ' (still)';
+    settled.then(() => {
+      for (let t = 0; t <= still + 1e-6; t += 1 / 30) step(t);
+      render(still);
+      document.title += ' (still)';
+    });
   } else {
     syncRunning();
+    settled.then(() => { if (!running()) render(lastT); });
   }
 
   // Console helpers: SG.shift() triggers a worldline shift, SG.ink() brings fresh ink
@@ -188,7 +209,7 @@
       if (!running()) render(lastT);
     },
     state: () => ({
-      target: meter.target, shifting: meter.shifting, worldline: controller.worldline,
+      centre: centre(), target: meter.target, shifting: meter.shifting, worldline: controller.worldline,
       t: lastT, seed, speed, running: running(), ms: cost, frames,
       paint: { blend: scene.ink.blend, gain: scene.ink.gain },
       ink: scene.ink.blooms.map(b => ({ kind: b.kind, color: b.color, rgb: Ink.INKS[b.color], phase: b.phase(lastT)[0] })),

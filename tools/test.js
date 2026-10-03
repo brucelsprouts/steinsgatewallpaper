@@ -178,14 +178,42 @@ function simulate(field, secs, each, from = 0) {
   for (let t = from; t <= secs; t += 1) { field.update(t); each(field, t); }
 }
 
-test('ink: boots with four resting elements and forms a fifth within seconds', () => {
+test('ink: boots with its minimum of resting elements and forms another within seconds', () => {
   const { Kit, Ink } = loadInk();
   const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
   f.update(0);
-  assert.strictEqual(f.blooms.length, 4);
+  assert.strictEqual(f.blooms.length, Ink.MIN);
   assert.ok(f.blooms.every(b => b.phase(0)[0] === 'resting'));
   for (let t = 0; t <= 6; t += 0.5) f.update(t);
-  assert.strictEqual(f.blooms.length, 5);
+  assert.strictEqual(f.blooms.length, Ink.MIN + 1);
+});
+
+test('ink: new ink comes every few seconds and there is plenty of it', () => {
+  const { Kit, Ink } = loadInk();
+  for (const seed of [1, 2, 3]) {
+    const f = new Ink.Field(Kit.rng(seed), { x: 0, y: 0 });
+    let spawned = 0, last = null, sum = 0, n = 0;
+    simulate(f, 1800, (field, t) => {
+      const newest = field.blooms[field.blooms.length - 1];
+      if (newest !== last) { spawned++; last = newest; }
+      if (t > 120) { sum += field.active(t); n++; }
+    });
+    assert.ok(spawned >= 1800 / 15, `only ${spawned} elements in half an hour`);
+    assert.ok(sum / n >= Ink.MIN, `on average only ${(sum / n).toFixed(1)} elements at once`);
+  }
+});
+
+test('ink: drifts away from the centrepiece', () => {
+  const { Kit, Ink } = loadInk();
+  const away = { x: 560, y: 610 };
+  const f = new Ink.Field(Kit.rng(4), { x: 0, y: 0 }, { away });
+  let out = 0, all = 0;
+  simulate(f, 900, () => {});
+  for (const b of f.blooms) {
+    all++;
+    if (b.vx * (b.x - away.x) + b.vy * (b.y - away.y) > 0) out++;
+  }
+  assert.ok(all >= Ink.MIN && out >= all * 0.8, `${out} of ${all} drift away`);
 });
 
 test('ink: over three hours, never crowded or bare, zones never shared, colours never close', () => {
@@ -239,7 +267,8 @@ test('ink: a worldline shift throws a splash and dissolves the oldest', () => {
   const { Kit, Ink } = loadInk();
   const f = new Ink.Field(Kit.rng(1), { x: 0, y: 0 });
   let t = 0;
-  while (f.active(t) < Ink.MAX) f.update(++t);
+  while (f.active(t) < Ink.MAX && t < 3600) f.update(++t);
+  assert.strictEqual(f.active(t), Ink.MAX, 'never filled up');
   const oldest = f.blooms.filter(b => b.phase(t)[0] === 'resting').sort((a, b) => a.born - b.born)[0];
   f.shift(t);
   const splash = f.blooms[f.blooms.length - 1];
@@ -268,6 +297,95 @@ test('ink: paint defaults to overlay at 62%, and only knows overlay and screen',
   assert.deepStrictEqual([f.blend, f.gain], ['screen', 1.2]);
   f.style({ blend: 'difference', gain: -3 });
   assert.deepStrictEqual([f.blend, f.gain], ['overlay', 0]);
+});
+
+// ---------- Light: where the shafts come from (nothing is drawn without a screen) ----------
+
+function loadAtmos() {
+  const ctx = { Math };
+  vm.createContext(ctx);
+  const src = ['kit.js', 'atmos.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
+  vm.runInContext(src + ';this.Kit = Kit; this.Atmos = Atmos;', ctx);
+  return ctx;
+}
+
+test('light: the shafts pan from side to side over the top, slowly', () => {
+  const { Kit, Atmos } = loadAtmos();
+  for (const seed of [1, 7]) {
+    const light = new Atmos.Light(Kit.rng(seed));
+    let left = false, right = false, top = false, fastest = 0, prev = light.sun(0);
+    for (let t = 0; t <= 720; t++) {
+      const s = light.sun(t);
+      if (s.x < 0) left = true;
+      if (s.x > 2560) right = true;
+      if (s.x > 900 && s.x < 1700 && s.y < 0) top = true;
+      fastest = Math.max(fastest, Math.hypot(s.x - prev.x, s.y - prev.y));
+      prev = s;
+    }
+    assert.ok(left && right && top, 'did not travel from side to side over the top');
+    assert.ok(fastest < 40, `moved ${fastest.toFixed(0)} px in a second`);
+  }
+});
+
+test('light: its pool stays off the centrepiece and the shafts fade before it', () => {
+  const { Kit, Atmos } = loadAtmos();
+  const light = new Atmos.Light(Kit.rng(2));
+  for (let t = 0; t <= 720; t += 5) {
+    assert.ok(light.pool(t).x >= 1250, `pool at ${light.pool(t).x} at ${t}s`);
+    assert.ok(light.beamAt(560, 610, t) < 0.25, `meter lit ${light.beamAt(560, 610, t).toFixed(2)} at ${t}s`);
+  }
+});
+
+function loadPortrait() {
+  const ctx = { Math, Promise, Sway: { Warp: class {} } };
+  vm.createContext(ctx);
+  const src = ['kit.js', 'portrait.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
+  vm.runInContext(src + ';this.Portrait = Portrait;', ctx);
+  return ctx;
+}
+
+// The hair over a run where the body moves 25 px to the left at 5 s (`at(t)`, by
+// default the way the centrepiece's depth plane follows a flick of the cursor), stepped
+// at `fps`.
+function swing(fps, at) {
+  const p = new (loadPortrait().Portrait.Portrait)();
+  const out = [];
+  let cam = -1, last = 0;
+  for (let i = 0; i <= 15 * fps; i++) {
+    const t = i / fps;
+    cam += ((t < 5 ? -1 : 1) - cam) * (1 - Math.exp(-(t - last) / 0.78));
+    last = t;
+    p.update(t, { x: at ? at(t) : -cam * 12.6, y: 0 });
+    out.push({ t, ...p.hair.off(), arms: p.arms.map(a => a.off().x) });
+  }
+  return out;
+}
+
+test('portrait: the hair trails a move, swings back and settles', () => {
+  const run = swing(30), at = (a, b) => run.filter(s => s.t >= a && s.t < b).map(s => s.x);
+  const before = Math.max(...at(4, 5)), trail = Math.max(...at(5, 6.5));
+  assert.ok(trail > before + 6, `trailed ${trail.toFixed(1)} px (was ${before.toFixed(1)})`);
+  assert.ok(Math.min(...at(5.5, 8)) < before, 'never swung back');
+  const settled = at(10, 15).map(x => Math.abs(x - before));
+  assert.ok(Math.max(...settled) < 8, `still swinging ${Math.max(...settled).toFixed(1)} px from rest`);
+});
+
+test('portrait: the arms trail a move too, more gently than the hair, and settle', () => {
+  const run = swing(30), during = run.filter(s => s.t >= 5 && s.t < 7), after = run.filter(s => s.t >= 11);
+  const hair = Math.max(...during.map(s => Math.abs(s.x)));
+  for (const side of [0, 1]) {
+    const arm = Math.max(...during.map(s => Math.abs(s.arms[side])));
+    assert.ok(arm > 1 && arm < hair, `arm ${side} swung ${arm.toFixed(1)} px (hair ${hair.toFixed(1)})`);
+    const rest = Math.max(...after.map(s => Math.abs(s.arms[side])));
+    assert.ok(rest < 4, `arm ${side} still ${rest.toFixed(1)} px out`);
+  }
+});
+
+test('portrait: the hair moves the same at any frame rate', () => {
+  const glide = t => 12.6 - 25.2 * (0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, (t - 5) / 0.8))));
+  const a = swing(30, glide), b = swing(60, glide).filter((s, i) => i % 2 === 0);
+  const worst = Math.max(...a.map((s, i) => Math.hypot(s.x - b[i].x, s.y - b[i].y)));
+  assert.ok(worst < 0.5, `30 and 60 fps differ by ${worst.toFixed(2)} px`);
 });
 
 process.exitCode = failures ? 1 : 0;

@@ -1,12 +1,13 @@
 'use strict';
-// The three user settings, from: defaults -> URL query -> Lively / Wallpaper Engine.
-//   display: time | date | worldline
+// The user settings, from: defaults -> URL query -> Lively / Wallpaper Engine.
+//   centre:  makise (a picture, img/makise.png) | nixie (the divergence meter)
+//   display: time | date | worldline (what the nixie meter shows)
 //   glow:    orange | white
 //   shift:   worldline shifts on/off (random every 20-60 min, and on click)
 const Config = (() => {
-  const defaults = { display: 'time', glow: 'orange', shift: true };
+  const defaults = { centre: 'makise', display: 'time', glow: 'orange', shift: true };
   // Lively dropdowns report an index; map them back to our values.
-  const choices = { display: ['time', 'date', 'worldline'], glow: ['orange', 'white'] };
+  const choices = { centre: ['makise', 'nixie'], display: ['time', 'date', 'worldline'], glow: ['orange', 'white'] };
 
   const values = { ...defaults };
   const listeners = [];

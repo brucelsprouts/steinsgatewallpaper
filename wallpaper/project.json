@@ -1,9 +1,19 @@
 {
   "contentrating": "Everyone",
-  "description": "A divergence meter: nixie tubes among slowly turning clockwork and paint. Shows the time, the date or a worldline. Move the mouse for parallax; click to shift.",
+  "description": "Makise Kurisu among slowly turning clockwork, living paint and drifting light, or a nixie divergence meter showing the time, the date or a worldline. Move the mouse for parallax; click to shift worldlines.",
   "file": "index.html",
   "general": {
     "properties": {
+      "centre": {
+        "order": 99,
+        "text": "Centrepiece",
+        "type": "combo",
+        "value": "makise",
+        "options": [
+          { "label": "Makise Kurisu", "value": "makise" },
+          { "label": "Nixie meter", "value": "nixie" }
+        ]
+      },
       "display": {
         "order": 100,
         "text": "Display",

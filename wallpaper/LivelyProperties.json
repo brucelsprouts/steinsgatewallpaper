@@ -1,4 +1,10 @@
 {
+  "centre": {
+    "type": "dropdown",
+    "value": 0,
+    "text": "Centrepiece",
+    "items": ["Makise Kurisu", "Nixie meter"]
+  },
   "display": {
     "type": "dropdown",
     "value": 0,

@@ -7,7 +7,10 @@
 // moves opposite the deep clockwork; foreground silhouettes move the most.
 const Scene = (() => {
   const A = Mech.Assembly, O = Paint.Overlay;
-  const METER = { cx: 660, cy: 670, tubeH: 210, depth: 0.3 };
+  // Well clear of the astrolabe on its right, even with the cursor pulling them together.
+  const METER = { cx: 560, cy: 610, tubeH: 210, depth: 0.3 };
+  // What the scene darkens around the meter, so it keeps a pool of negative space.
+  const FOCUS = { x: METER.cx, y: METER.cy, rx: 760, ry: 440 };
   const P = 42; // parallax travel in design px per unit of depth
 
   function compose() {
@@ -15,7 +18,8 @@ const Scene = (() => {
       // ---- Deep clockwork ----
       new A({ x: 700, y: -330, depth: -0.8, blur: 2.5, res: 0.7, alpha: 0.07, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
         parts: [{ type: 'dial', r: 780, hands: false, track: false, turn: -1 }] }),
-      new O({ kind: 'worldlines', x: 750, y: 1035, width: 1500, height: 200, depth: -0.7, alpha: 0.17, seed: 21, op: 'screen' }),
+      new O({ kind: 'worldlines', x: 690, y: 1000, width: 1500, height: 200, depth: -0.7, alpha: 0.28, glow: 0.8, breathe: 0.1,
+        pulse: true, seed: 21, op: 'screen' }),
       // The astrolabe: a giant dial whose rings step against each other.
       new A({ x: 2000, y: 560, depth: -0.6, blur: 1.6, res: 0.8, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
         parts: [{ type: 'dial', r: 820, ring24: true }] }),
@@ -60,7 +64,7 @@ const Scene = (() => {
       new O({ kind: 'marks', x: 1900, y: 1250, spread: 300, depth: 0.35, alpha: 0.12, seed: 41 }),
       new A({ x: 2470, y: 1440, depth: 0.9, blur: 0.6, alpha: 1, rx: 0.12, ry: -0.15, seed: 7, drift: 18, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
-        parts: [{ type: 'gear', style: 'solid', pitch: 72, teeth: 40, spokes: 6, edge: 0.65 }] }),
+        parts: [{ type: 'gear', style: 'solid', pitch: 72, teeth: 40, spokes: 6, edge: 0.42 }] }),
       new A({ x: 2610, y: 20, depth: 0.75, blur: 0.5, alpha: 1, rx: 0.1, ry: 0.15, seed: 8, drift: 14, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
         parts: [{ type: 'gear', style: 'solid', pitch: 62, teeth: 26, spokes: 5 }] }),
@@ -81,7 +85,8 @@ const Scene = (() => {
       this.shifts = [];
       this.target = { x: 0, y: 0 };
       this.meterCam = { x: 0, y: 0 };
-      this.ink = new Ink.Field(random, this.target, ink);
+      this.ink = new Ink.Field(random, this.target, { away: { x: METER.cx, y: METER.cy }, ...ink });
+      this.focus = FOCUS;
       this.lastT = null;
     }
 
@@ -94,22 +99,24 @@ const Scene = (() => {
       for (const c of cams) { c.x = this.target.x; c.y = this.target.y; }
     }
 
-    build(S, view, theme) {
+    // `focus` is the centrepiece's pool of negative space (design px: centre and radii).
+    build(S, view, theme, focus = FOCUS) {
       const pal = Mech.PALETTES[theme] || Mech.PALETTES.warm;
       for (const it of this.items) it.build(S, pal);
       this.dust.build(S, theme);
       this.ink.build(S);
-      // Darken whatever sits behind the meter so it keeps a pool of negative space.
-      const k = 0.25, R = 760;
-      const c = Kit.canvas(R * 2 * view.S * k, R * 2 * view.S * k), g = c.getContext('2d');
-      g.setTransform(view.S * k, 0, 0, view.S * k * 0.58, R * view.S * k, R * view.S * k);
+      // Darken whatever sits behind the centrepiece so it keeps a pool of negative space.
+      this.focus = focus;
+      const k = 0.25, R = focus.rx, sy = focus.ry / focus.rx;
+      const c = Kit.canvas(R * 2 * view.S * k, R * 2 * sy * view.S * k), g = c.getContext('2d');
+      g.setTransform(view.S * k, 0, 0, view.S * k * sy, R * view.S * k, R * sy * view.S * k);
       const r = g.createRadialGradient(0, 0, 0, 0, 0, R);
       for (let i = 0; i <= 10; i++) {
         const x = i / 10;
         r.addColorStop(x, `rgba(4,3,3,${(0.9 * (1 - x * x * (3 - 2 * x))).toFixed(3)})`);
       }
       g.fillStyle = r;
-      g.fillRect(-R, -R / 0.58, R * 2, R * 2 / 0.58);
+      g.fillRect(-R, -R, R * 2, R * 2);
       this.clearing = c;
     }
 
@@ -144,11 +151,12 @@ const Scene = (() => {
       for (const it of this.items) if (it.depth < METER.depth) it.draw(ctx, view, t, now, this.shifts);
       this.ink.draw(ctx, view, t, 'over', deep);
       ctx.restore();
-      const m = this.meterOffset(t), w = this.clearing.width / (view.S * 0.25), h = this.clearing.height / (view.S * 0.25);
+      const m = this.meterOffset(t), f = this.focus;
+      const w = this.clearing.width / (view.S * 0.25), h = this.clearing.height / (view.S * 0.25);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.drawImage(this.clearing,
-        view.ox + (METER.cx + m.x - w / 2) * view.S, view.oy + (METER.cy + m.y - h / 2) * view.S, w * view.S, h * view.S);
+        view.ox + (f.x + m.x - w / 2) * view.S, view.oy + (f.y + m.y - h / 2) * view.S, w * view.S, h * view.S);
     }
 
     drawFront(ctx, view, t, now) {
@@ -158,10 +166,10 @@ const Scene = (() => {
       this.ink.draw(ctx, view, t, 'over', near);
       for (const it of this.items) if (it.depth >= METER.depth) it.draw(ctx, view, t, now, this.shifts);
       const m = this.meterOffset(t);
-      this.dust.draw(ctx, view, t, { x: METER.cx + m.x, y: METER.cy + m.y });
+      this.dust.draw(ctx, view, t, { x: this.focus.x + m.x, y: this.focus.y + m.y });
       ctx.restore();
     }
   }
 
-  return { Scene, METER };
+  return { Scene, METER, FOCUS };
 })();

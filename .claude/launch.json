@@ -1,6 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "wallpaper", "runtimeExecutable": "node", "runtimeArgs": ["steinsgatewallpaper/tools/serve.js"], "port": 5173, "autoPort": true }
+    { "name": "wallpaper", "runtimeExecutable": "node", "runtimeArgs": ["tools/serve.js"], "port": 5173, "autoPort": true }
   ]
 }

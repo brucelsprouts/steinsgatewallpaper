@@ -1,21 +1,24 @@
 'use strict';
-// Atmosphere over the whole frame: drifting dust lit by the tubes and by soft light
-// shafts, very light smoke, hot spots, film light leaks drifting along the edges, a
-// grungy textured border under the vignette, dust wandering on the lens and film grain
-// over everything.
+// Atmosphere over the whole frame: dust wandering through the air, lit by the
+// centrepiece and by soft light shafts that pan slowly across the scene, very light
+// smoke, pools of light, film light leaks sliding along the edges, a grungy textured
+// border under the vignette, a soft bloom on everything bright, dust wandering on the
+// lens and living film grain over everything.
 const Atmos = (() => {
   const { TAU, canvas, rng, fbm2, pfbm2, smooth } = Kit;
 
   // ---------- Dust ----------
+  // Motes wander slowly every way through still air, rising a little: each drifts its
+  // own way and loops about on two slow swirls.
   class Dust {
-    constructor(n = 110, seed = 5) {
+    constructor(n = 140, seed = 5) {
       const r = rng(seed);
       this.motes = Array.from({ length: n }, () => ({
         x: r() * 2560, y: r() * 1540,
         depth: -0.6 + r() * 1.8,              // some behind the meter, some in front
         size: 0.7 + Math.pow(r(), 3) * 2.8,
-        rise: 2 + r() * 5,                     // design px per second
-        sway: 5 + r() * 12, phase: r() * TAU, rate: 0.04 + r() * 0.08,
+        vx: (r() - 0.5) * 5, rise: 0.4 + r() * 2.6, // design px per second
+        sway: 14 + r() * 34, phase: r() * TAU, rate: 0.02 + r() * 0.05,
         a: 0.3 + r() * 0.7,
       }));
       this.cam = { x: 0, y: 0 };
@@ -37,14 +40,15 @@ const Atmos = (() => {
       this.plain = dot('214,208,200');
     }
 
-    // `light` is the meter centre in design px: motes near it catch the glow, and so do
+    // `light` is the centrepiece in design px: motes near it catch the glow, and so do
     // motes drifting through a light shaft.
     draw(ctx, view, t, light) {
       const P = 42, W = 2660, H = 1540;
       ctx.globalCompositeOperation = 'screen';
       for (const m of this.motes) {
-        let x = m.x + Math.sin(t * m.rate + m.phase) * m.sway - this.cam.x * P * m.depth;
-        let y = m.y - t * m.rise - this.cam.y * P * m.depth * 0.7;
+        let x = m.x + t * m.vx + Math.sin(t * m.rate + m.phase) * m.sway
+          + Math.sin(t * m.rate * 0.43 + m.phase * 2.1) * m.sway * 0.8 - this.cam.x * P * m.depth;
+        let y = m.y - t * m.rise + Math.cos(t * m.rate * 0.77 + m.phase * 1.3) * m.sway * 0.7 - this.cam.y * P * m.depth * 0.7;
         x = ((x + 50) % W + W) % W - 50;
         y = ((y + 50) % H + H) % H - 50;
         const d2 = (x - light.x) ** 2 + ((y - light.y) * 1.6) ** 2;
@@ -147,12 +151,16 @@ const Atmos = (() => {
     g.restore();
   }
 
-  // Light shafts fall from beyond the upper right corner into the clockwork, and fade
-  // well before they reach the tubes. Each sways a little and comes and goes on its own.
-  const SUN = { x: 2950, y: -420 }, REACH = 3000;
+  // Light shafts fall from a source beyond the frame into the clockwork, and fade well
+  // before they reach the centrepiece. The source travels slowly along an arc above the
+  // frame, from the right side over the top to beyond the upper left corner and back
+  // (twelve minutes there and back), so the shafts and the pool of light they make
+  // pan across the scene. Each shaft sways a little and comes and goes on its own.
+  const ARC = { x: 1300, y: 700, rx: 2200, ry: 1693, mid: -1.35, amp: 1.1, period: 720 };
+  const AIM = { x: 1700, y: 730 }, REACH = 3000;
   const BEAMS = [
-    { a: 2.22, w: 110, i: 0.8 }, { a: 2.31, w: 70, i: 1 }, { a: 2.40, w: 150, i: 0.6 },
-    { a: 2.49, w: 60, i: 0.9 }, { a: 2.58, w: 120, i: 0.55 },
+    { a: -0.18, w: 110, i: 0.8 }, { a: -0.09, w: 70, i: 1 }, { a: 0, w: 150, i: 0.6 },
+    { a: 0.09, w: 60, i: 0.9 }, { a: 0.18, w: 120, i: 0.55 },
   ];
   const RAYS = 0.06;
   // Along a shaft (0 at the sun, 1 at its far end) and across it (a fraction of its
@@ -206,7 +214,8 @@ const Atmos = (() => {
   }
 
   class Light {
-    // `random` drives the leaks (seed it for repeatable stills).
+    // `random` drives the leaks and where the light source starts (seed it for
+    // repeatable stills).
     constructor(random = Math.random) {
       this.random = random;
       this.flareAt = -1e9;
@@ -214,19 +223,37 @@ const Atmos = (() => {
       this.leaks = [];
       this.next = null;
       this.lastEdge = null;
+      this.arcPh = random() * TAU;
+      this.at = null; // the shafts as last worked out, and when
     }
 
     build(view) {
       const k = 1 / 8, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k), S = view.S * k;
       const X = x => (view.ox + x * view.S) * k, Y = y => (view.oy + y * view.S) * k;
-      // Hot spots: light pooling on the clockwork.
+      // Hot spots: light pooling on the clockwork. The main pool follows the shafts
+      // (see pool()); these two stay put.
       this.hot = canvas(w, h);
       const g = this.hot.getContext('2d');
       g.globalCompositeOperation = 'lighter';
-      glowSpot(g, X(2050), Y(430), 560 * S, 470 * S, '255,196,140', 0.55);
       glowSpot(g, X(1720), Y(1130), 420 * S, 300 * S, '150,205,215', 0.32);
       glowSpot(g, X(2330), Y(860), 280 * S, 240 * S, '255,176,120', 0.24);
+      if (!this.spot) {
+        this.spot = canvas(64, 64);
+        glowSpot(this.spot.getContext('2d'), 32, 32, 32, 32, '255,196,140', 0.55);
+      }
       if (!this.shaft) this.shaft = shaftSprite();
+    }
+
+    // Where the light comes from at time t (design px), somewhere along its arc.
+    sun(t) {
+      const th = ARC.mid + ARC.amp * Math.sin(TAU * t / ARC.period + this.arcPh);
+      return { x: ARC.x + ARC.rx * Math.cos(th), y: ARC.y + ARC.ry * Math.sin(th) };
+    }
+
+    // The pool of light the shafts make on the clockwork, kept off the centrepiece.
+    pool(t) {
+      const s = this.sun(t);
+      return { x: Math.max(1250, s.x + (AIM.x - s.x) * 0.74), y: s.y + (AIM.y - s.y) * 0.74 };
     }
 
     // ---- Leaks: light bleeding in past the edge of the film, drifting along it ----
@@ -249,7 +276,7 @@ const Atmos = (() => {
       const edge = edges[Math.floor(r() * edges.length)];
       let u = r() * LEAKS.reduce((s, p) => s + p.w, 0), pal = LEAKS[0];
       for (const p of LEAKS) if ((u -= p.w) <= 0) { pal = p; break; }
-      const from = 0.1 + r() * 0.8, travel = (r() < 0.5 ? -1 : 1) * (0.25 + r() * 0.25), life = 55 + r() * 40;
+      const from = 0.05 + r() * 0.9, travel = (r() < 0.5 ? -1 : 1) * (0.45 + r() * 0.4), life = 70 + r() * 50;
       this.lastEdge = edge;
       this.leaks.push({
         edge, pal, knot: [0.3 + r() * 0.4, 0.35 + r() * 0.3, 0.18 + r() * 0.12],
@@ -279,23 +306,31 @@ const Atmos = (() => {
 
     // ---- Shafts ----
 
-    // Each shaft's angle and strength at time t.
+    // Where the light comes from and each shaft's angle and strength at time t. Asked
+    // for many times a frame (by every mote of dust), so worked out once per frame.
     beams(t) {
-      return BEAMS.map((b, i) => ({
-        a: b.a + 0.015 * Math.sin(t / (41 + 5 * i) + i * 1.7),
-        w: b.w,
-        i: b.i * (0.55 + 0.45 * Math.sin(t / (29 + 7 * i) + i * 2.3)),
-      }));
+      if (this.at && this.at.t === t) return this.at;
+      const s = this.sun(t), base = Math.atan2(AIM.y - s.y, AIM.x - s.x);
+      this.at = {
+        t, sun: s,
+        list: BEAMS.map((b, i) => ({
+          a: base + b.a + 0.015 * Math.sin(t / (41 + 5 * i) + i * 1.7),
+          w: b.w,
+          i: b.i * (0.55 + 0.45 * Math.sin(t / (29 + 7 * i) + i * 2.3)),
+        })),
+      };
+      return this.at;
     }
 
     // How strongly the shafts light the point (x, y), 0 to about 1: dust drifting
     // through them catches the light.
     beamAt(x, y, t) {
-      const dx = x - SUN.x, dy = y - SUN.y, d = Math.hypot(dx, dy), u = d / REACH;
+      const { sun, list } = this.beams(t);
+      const dx = x - sun.x, dy = y - sun.y, d = Math.hypot(dx, dy), u = d / REACH;
       if (u <= 0 || u >= 1) return 0;
       const ang = Math.atan2(dy, dx);
       let v = 0;
-      for (const b of this.beams(t)) {
+      for (const b of list) {
         const across = d * Math.sin(ang - b.a) / (b.w * 1.2);
         v += b.i * Math.exp(-((across / spread(u)) ** 2));
       }
@@ -311,9 +346,12 @@ const Atmos = (() => {
         const dx = -this.cam.x * 42 * 0.6 * S, dy = -this.cam.y * 42 * 0.4 * S;
         ctx.globalAlpha = 0.12 * (0.85 + 0.15 * Math.sin(t / 19));
         ctx.drawImage(this.hot, dx, dy, view.W, view.H);
+        const p = this.pool(t), rx = 560 * S, ry = 470 * S;
+        ctx.drawImage(this.spot, view.ox + p.x * S - rx + dx, view.oy + p.y * S - ry + dy, rx * 2, ry * 2);
       } else if (pass === 'rays') {
-        const ox = view.ox + (SUN.x - this.cam.x * 42 * 0.5) * S, oy = view.oy + (SUN.y - this.cam.y * 42 * 0.35) * S;
-        for (const b of this.beams(t)) {
+        const { sun, list } = this.beams(t);
+        const ox = view.ox + (sun.x - this.cam.x * 42 * 0.5) * S, oy = view.oy + (sun.y - this.cam.y * 42 * 0.35) * S;
+        for (const b of list) {
           const c = Math.cos(b.a) * S, s = Math.sin(b.a) * S, h = b.w * 2.4;
           ctx.setTransform(c, s, -s, c, ox, oy);
           ctx.globalAlpha = Math.min(1, RAYS * b.i * (1 + (burst - 1) * 0.3));
@@ -337,15 +375,17 @@ const Atmos = (() => {
   }
 
   // ---------- Lens dust: fine specks on the glass, drifting slowly about ----------
-  // Seen mostly toward the edges, as before, but each speck wanders on its way.
+  // Seen mostly toward the edges, each speck meandering on its way; a few larger, soft
+  // ones float out of focus.
   class LensDust {
     constructor(n = 600, seed = 23) {
       const r = rng(seed);
-      this.specks = Array.from({ length: n }, () => {
-        const a = r() * TAU, v = 0.6 + r() * 2.4;
+      this.specks = Array.from({ length: n }, (_, i) => {
+        const a = r() * TAU, v = 0.8 + r() * 2.6, big = i < 14;
         return {
           x: r() * 2600, y: r() * 1480, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
-          size: 0.3 + Math.pow(r(), 4) * 1.2, a: 0.1 + r() * 0.35, ph: r() * TAU, wob: 4 + r() * 14,
+          size: big ? 3 + r() * 4 : 0.3 + Math.pow(r(), 4) * 1.2, a: big ? 0.05 + r() * 0.06 : 0.1 + r() * 0.35,
+          ph: r() * TAU, wob: 14 + r() * 40, rate: 1 / (14 + r() * 20),
         };
       });
     }
@@ -366,11 +406,12 @@ const Atmos = (() => {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'screen';
       for (const s of this.specks) {
-        let x = s.x + s.vx * t + Math.sin(t / 17 + s.ph) * s.wob, y = s.y + s.vy * t + Math.cos(t / 23 + s.ph) * s.wob;
+        let x = s.x + s.vx * t + Math.sin(t * s.rate + s.ph) * s.wob + Math.sin(t * s.rate * 0.53 + s.ph * 1.7) * s.wob * 0.6;
+        let y = s.y + s.vy * t + Math.cos(t * s.rate * 0.81 + s.ph) * s.wob + Math.cos(t * s.rate * 0.37 + s.ph * 2.3) * s.wob * 0.5;
         x = ((x % W) + W) % W - 20;
         y = ((y % H) + H) % H - 20;
         const edge = smooth(0.4, 1.05, Math.cbrt(Math.abs(x / 1280 - 1) ** 3 + Math.abs(y / 720 - 1) ** 3));
-        const a = s.a * (0.06 + 0.94 * edge) * 0.35 * (0.85 + 0.15 * Math.sin(t / 7 + s.ph * 3));
+        const a = s.a * (0.12 + 0.88 * edge) * 0.45 * (0.85 + 0.15 * Math.sin(t / 7 + s.ph * 3));
         if (a < 0.004) continue;
         const d = s.size * px * 3.2;
         ctx.globalAlpha = a;
@@ -382,29 +423,100 @@ const Atmos = (() => {
   }
 
   // ---------- Grain: fine speckle, strongest at the edges and around the glow ----------
-  // Half resolution, so each grain covers about two pixels. Drawn with `difference`:
-  // on the dark border it lifts into speckle, on the bright glow it breaks it up a little.
-  const AMP = 32;
-  function grain(view, hot, seed = 61) {
-    const k = 0.5, w = Math.max(1, Math.ceil(view.W * k)), h = Math.max(1, Math.ceil(view.H * k));
-    const c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
-    const S = view.S * k, hx = view.ox * k + hot.x * S, hy = view.oy * k + hot.y * S;
-    // Separable terms: the edge falloff and the hot spot, per column and per row.
-    const ex = new Float32Array(w), gx = new Float32Array(w), ey = new Float32Array(h), gy = new Float32Array(h);
-    for (let x = 0; x < w; x++) { ex[x] = Math.abs(x / w * 2 - 1) ** 3; gx[x] = Math.exp(-(((x - hx) / (hot.rx * S)) ** 2)); }
-    for (let y = 0; y < h; y++) { ey[y] = Math.abs(y / h * 2 - 1) ** 3; gy[y] = Math.exp(-(((y - hy) / (hot.ry * S)) ** 2)); }
-    let s = seed >>> 0 || 1;
-    for (let y = 0, i = 0; y < h; y++) {
-      for (let x = 0; x < w; x++, i += 4) {
-        const edge = smooth(0.55, 1.05, Math.cbrt(ex[x] + ey[y]));
-        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
-        const n = (s >>> 0) / 4294967296;
-        const v = n * n * (0.02 + 0.28 * edge + 0.3 * gx[x] * gy[y]) * AMP;
-        d[i] = v; d[i + 1] = v * 0.95; d[i + 2] = v * 0.88; d[i + 3] = 255;
+  // Living film grain: a new grain every frame, so it never sits on the screen like dust.
+  // A tile of noise is laid at a fresh offset each frame, at half resolution so each
+  // grain covers about two pixels, and shaded by where grain shows (the edges and around
+  // the glow). Drawn with `difference`: on the dark border it lifts into speckle, on the
+  // bright glow it breaks it up a little.
+  const AMP = 32, PEAK = 0.6, TILE = 512;
+  class Grain {
+    constructor(seed = 61) { this.r = rng(seed); }
+
+    // `hot` is where grain thickens around the glow (design px: centre and radii).
+    build(view, hot) {
+      if (!this.tile) {
+        const c = canvas(TILE, TILE), g = c.getContext('2d'), img = g.createImageData(TILE, TILE), d = img.data;
+        let s = 0x9e3779b9;
+        for (let i = 0; i < d.length; i += 4) {
+          s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+          const n = (s >>> 0) / 4294967296, v = n * n * PEAK * AMP;
+          d[i] = v; d[i + 1] = v * 0.95; d[i + 2] = v * 0.88; d[i + 3] = 255;
+        }
+        g.putImageData(img, 0, 0);
+        this.tile = c;
       }
+      // Where grain shows, at an eighth of the resolution (it varies slowly).
+      const k = 1 / 8, w = Math.max(1, Math.ceil(view.W * k)), h = Math.max(1, Math.ceil(view.H * k));
+      const m = canvas(w, h), mg = m.getContext('2d'), img = mg.createImageData(w, h), d = img.data;
+      const S = view.S * k, hx = view.ox * k + hot.x * S, hy = view.oy * k + hot.y * S;
+      for (let y = 0, i = 0; y < h; y++) {
+        const ey = Math.abs(y / h * 2 - 1) ** 3, gy = Math.exp(-(((y - hy) / (hot.ry * S)) ** 2));
+        for (let x = 0; x < w; x++, i += 4) {
+          const edge = smooth(0.55, 1.05, Math.cbrt(Math.abs(x / w * 2 - 1) ** 3 + ey));
+          const gx = Math.exp(-(((x - hx) / (hot.rx * S)) ** 2));
+          d[i + 3] = 255 * Math.min(1, (0.02 + 0.28 * edge + 0.3 * gx * gy) / PEAK);
+        }
+      }
+      mg.putImageData(img, 0, 0);
+      this.mask = m;
+      this.work = canvas(Math.ceil(view.W / 2), Math.ceil(view.H / 2));
+      this.pat = null;
     }
-    g.putImageData(img, 0, 0);
-    return c;
+
+    draw(ctx, view) {
+      const g = this.work.getContext('2d'), w = this.work.width, h = this.work.height;
+      if (!this.pat) this.pat = g.createPattern(this.tile, 'repeat');
+      const ox = Math.floor(this.r() * TILE), oy = Math.floor(this.r() * TILE);
+      g.globalCompositeOperation = 'copy';
+      g.setTransform(1, 0, 0, 1, -ox, -oy);
+      g.fillStyle = this.pat;
+      g.fillRect(ox, oy, w, h);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalCompositeOperation = 'destination-in';
+      g.drawImage(this.mask, 0, 0, w, h);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'difference';
+      ctx.globalAlpha = 1;
+      ctx.drawImage(this.work, 0, 0, view.W, view.H);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+
+  // ---------- Bloom: everything bright glows a little, as through a real lens ----------
+  // The frame so far is shrunk to an eighth, its darker part is pushed to black so
+  // only what is bright is left, and that is blurred (once narrow, once wide) and laid
+  // back over the frame with `screen`.
+  const BLOOM = { contrast: 2.2, narrow: 3, wide: 10, a: 0.32 };
+  class Bloom {
+    build(view) {
+      const w = Math.max(1, Math.ceil(view.W / 8)), h = Math.max(1, Math.ceil(view.H / 8));
+      this.small = canvas(w, h);
+      this.soft = canvas(w, h);
+    }
+
+    draw(ctx, src, view) {
+      const w = this.small.width, h = this.small.height, s = this.small.getContext('2d'), b = this.soft.getContext('2d');
+      s.globalCompositeOperation = 'copy';
+      s.imageSmoothingQuality = 'high';
+      s.drawImage(src, 0, 0, w, h);
+      // Blur sizes follow the design scale, so the halo looks the same at any resolution.
+      const S = view.S;
+      b.globalCompositeOperation = 'copy';
+      b.filter = `contrast(${BLOOM.contrast}) blur(${(BLOOM.narrow * S).toFixed(2)}px)`;
+      b.drawImage(this.small, 0, 0);
+      b.globalCompositeOperation = 'lighter';
+      b.globalAlpha = 0.7;
+      b.filter = `contrast(${BLOOM.contrast}) blur(${(BLOOM.wide * S).toFixed(2)}px)`;
+      b.drawImage(this.small, 0, 0);
+      b.filter = 'none';
+      b.globalAlpha = 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = BLOOM.a;
+      ctx.drawImage(this.soft, 0, 0, view.W, view.H);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
   }
 
   // ---------- Grunge border: blotchy dark texture that thickens toward the edges ----------
@@ -429,5 +541,5 @@ const Atmos = (() => {
     return c;
   }
 
-  return { Dust, Smoke, Light, LensDust, grain, grunge };
+  return { Dust, Smoke, Light, LensDust, Grain, Bloom, grunge };
 })();

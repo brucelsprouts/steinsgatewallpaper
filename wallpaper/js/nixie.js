@@ -9,6 +9,7 @@ const Nixie = (() => {
     warm: { core: '#ffe6c2', hot: '#ff7420', glow: '255,104,24', metal: '150,118,92' },
     cold: { core: '#ffffff', hot: '#c4d2ec', glow: '186,204,236', metal: '124,130,142' },
   };
+  const STREAK = 0.16; // strength of the anamorphic streak at normal brightness
 
   // ---------- Digit glyphs (unit height 1, width 0.56) ----------
   const DW = 0.56;
@@ -239,6 +240,25 @@ const Nixie = (() => {
     return sp;
   }
 
+  // The streak's light: a hair-thin line, white-hot at the middle, in a soft band of
+  // the glow's colour, both fading toward the ends.
+  function streakSprite(th) {
+    const w = 512, h = 48, c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
+    const [r, gr, b] = th.glow.split(',').map(Number);
+    const hex = parseInt(th.core.slice(1), 16), cr = hex >> 16, cg = (hex >> 8) & 255, cb = hex & 255;
+    for (let y = 0; y < h; y++) {
+      const v = (y + 0.5) / h * 2 - 1, thin = Math.exp(-((v / 0.07) ** 2)), soft = Math.exp(-((v / 0.35) ** 2));
+      for (let x = 0; x < w; x++) {
+        const u = Math.abs((x + 0.5) / w * 2 - 1), along = Math.pow(1 - u, 2.2), hot = thin * (1 - u) ** 3;
+        const i = (y * w + x) * 4;
+        d[i] = r + (cr - r) * hot; d[i + 1] = gr + (cg - gr) * hot; d[i + 2] = b + (cb - b) * hot;
+        d[i + 3] = 255 * along * (0.75 * thin + 0.25 * soft);
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
   // Meter-wide sprites: shadow, plinth, sockets, haze. Local origin = first tube top-left.
   function buildFrame(L, th, S, opts) {
     const { total, w, h, xs } = L;
@@ -328,6 +348,10 @@ const Nixie = (() => {
       g.fillStyle = `rgba(${th.glow},0.12)`;
       for (const x of xs) g.fillRect(x + w * 0.05, base - h * 0.035, w * 0.9, Math.max(0.8, h * 0.004));
     });
+
+    // Anamorphic streak: a long thin line of light through the glowing digits, the way a
+    // cinema lens draws one across a bright source. Soft, so one small image stretched.
+    fr.streak = { c: streakSprite(th), cx: total / 2, cy: h * 0.62, w: total * 2.6, h: h * 0.36 };
 
     const R = total * 0.85;
     fr.haze = sprite(total, h, R, S, g => {
@@ -490,6 +514,10 @@ const Nixie = (() => {
       ctx.globalCompositeOperation = 'lighter';
       add(fr.socketsLit, x0, y0, avg);
       add(fr.haze, x0, y0, avg);
+      // The streak breathes a little in length and flares with the tubes.
+      const st = fr.streak, sw = st.w * (1 + 0.04 * Math.sin(t / 2.7));
+      ctx.globalAlpha = Math.min(1, STREAK * avg * avg);
+      ctx.drawImage(st.c, ox + (x0 + st.cx - sw / 2) * S, oy + (y0 + st.cy - st.h / 2) * S, sw * S, st.h * S);
       ctx.restore();
     }
   }

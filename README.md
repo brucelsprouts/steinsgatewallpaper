@@ -1,12 +1,15 @@
 # Divergence Meter
 
-An animated desktop wallpaper: a row of nixie tubes on a walnut base, surrounded by
-slowly turning clocks, gears and an escapement, with living ink, light leaks, faint
-smoke and film grain over the top. It shows the time, the date or a worldline, and
-every so often the worldline shifts: the tubes scramble, the clocks spin, and
-everything settles.
+An animated desktop wallpaper: Makise Kurisu, or a row of nixie tubes on a walnut base,
+surrounded by slowly turning clocks, gears and an escapement, with living ink, light
+that pans across the scene, wandering dust, faint smoke and film grain over the top.
+The nixie meter shows the time, the date or a worldline. Every so often the worldline
+shifts: the tubes scramble (or the picture glitches), the clocks spin, and everything
+settles.
 
-Everything is drawn in code (HTML canvas, no build step). No art from the show is used.
+Everything is drawn in code (HTML canvas, no build step), apart from the Makise
+picture in `wallpaper/img/` (see [Using your own picture](#using-your-own-picture));
+without it, a drawn placeholder stands in.
 
 ![Preview](wallpaper/preview.jpg)
 
@@ -19,7 +22,7 @@ Everything is drawn in code (HTML canvas, no build step). No art from the show i
    (rename it to something like `divergence-meter` if you like).
 3. Start (or restart) Wallpaper Engine. The wallpaper appears under **Installed**.
    Select it and apply it to each monitor you want.
-4. The three settings appear in the panel on the right.
+4. The settings appear in the panel on the right.
 
 If moving the mouse or clicking does nothing, check that Wallpaper Engine is set to
 pass mouse input to wallpapers.
@@ -44,28 +47,96 @@ in Lively's settings.
 
 | Setting | Options | Default |
 | --- | --- | --- |
-| Display | Time (`HH.MM.SS`, 24-hour), Date (`YY.MM.DD`), Worldline | Time |
+| Centrepiece | Makise Kurisu (a picture), Nixie meter | Makise Kurisu |
+| Display (nixie meter) | Time (`HH.MM.SS`, 24-hour), Date (`YY.MM.DD`), Worldline | Time |
 | Glow colour | Orange, White | Orange |
 | Worldline shifts | On, Off | On |
+
+## Using your own picture
+
+The Makise centrepiece shows the first of these that exists in `wallpaper/img/`:
+`makise.webp`, `makise.png`, `makise.jpg`. Without one, `placeholder.webp` (a drawn
+silhouette) stands in. If no picture loads at all, the nixie meter takes its place.
+
+- A picture with a transparent background (a cut-out character) looks best. A plain
+  rectangular picture works too: its edges are feathered into the dark. (An entry
+  marked `cutout: true` in `SOURCES` is only faded at its foot, so its head stays whole.)
+- Any size: it is fitted into the left of the frame, standing on the bottom edge, with
+  its lower part fading out. It is toned down toward the scene's light, so it sits in
+  the shadows, with a faint backlight.
+- `makise.webp` is shown from the top down to between the thighs and knees (`crop: 0.6`
+  in `SOURCES` in `wallpaper/js/portrait.js`); a `.png` or `.jpg` is shown whole.
+- To move or resize it, change `BOX` at the top of `portrait.js` (design pixels on a
+  2560×1440 frame: centre, foot, maximum width and height, feathering, fade).
+
+### Bringing her to life
+
+`makise.webp` is rigged, so only the parts that should move do:
+
+- her **hair** sways on a layer of its own: a little all over, more on the bangs, most
+  down the long lock. It swings in a breeze that now and then gusts, and trails behind
+  when she drifts with the cursor;
+- her **arms** swing gently from the shoulders inside her **jacket**, whose loose cuffs
+  and hem, hanging away from her body, flutter a little more;
+- she **breathes**, softly: her shoulders rise a pixel or so and her arms ease out.
+
+Her face, shirt and legs never bend. The rig is three pictures beside `makise.webp`:
+
+| File | What it is |
+| --- | --- |
+| `makise-layers.png` | The moving layers: red the hair, green the jacket with the arms and hand in it, blue what's filled in beneath them |
+| `makise-under.webp` | The picture with the hair and jacket lifted off and the gap filled from around it: what shows where they swing aside |
+| `makise-sway.png` | How far each part moves: red the hair, green the arms swinging from the shoulders, blue how loosely the cloth hangs |
+
+Its entry in `SOURCES` (in `wallpaper/js/portrait.js`) also says, in the picture's
+pixels, where the shoulders are, how long the arms are and over which rows the breath
+eases off. `HAIR`, `ARMS` and `BREATH` at the top of `portrait.js` set how much
+everything moves.
+
+It all runs on the GPU (WebGL, `wallpaper/js/sway.js`). Without WebGL, or where the
+browser treats a local picture as foreign (it can under `file://`), the picture is drawn
+whole and holds still apart from floating.
+
+The rig is made by `python tools/swaymap.py` from the colours of the hair and jacket
+inside regions placed (and, for the long lock, traced) by hand for this picture, so it
+fits this picture only; rig pictures whose proportions don't match it are ignored. If
+you change the picture, redo the rig (move the regions in `swaymap.py`, run it again
+and touch the results up in any paint program: crisp edges on the layers, soft sway),
+or remove `rig` from its entry in `SOURCES`.
 
 ## How it behaves
 
 - **Worldline shifts** happen at random every 20–60 minutes. The tubes scramble and
   settle with a glow flare while the clocks spin fast (mostly backwards) and settle.
+  With the Makise centrepiece, the picture tears into glitching slices for a moment
+  instead.
   - In **Time** or **Date** mode the tubes show a canon worldline
     (0.571024, 0.337187, 1.130205 or 1.048596) for about 10 seconds, then roll back.
   - In **Worldline** mode they land on a new worldline and stay there.
 - **Clicking** the desktop:
-  - in Time or Date mode, spins the clocks and flashes the tubes; the time or date stays put;
+  - in Time or Date mode, spins the clocks and flashes the tubes (or makes the picture
+    flicker); the time or date stays put;
   - in Worldline mode, triggers a full shift.
 - **Moving the mouse** gives parallax: the deep clockwork drifts with the cursor while the
-  nearer layers and the meter move against it.
+  nearer layers and the centrepiece move against it.
+- **Makise** floats in place, bobbing gently, and breathes. Her hair sways in a breeze
+  that now and then gusts and trails behind her as she drifts with the cursor; her arms
+  swing a little in her jacket, its loose cuffs fluttering.
 - With **Worldline shifts** off, nothing shifts and clicks do nothing.
-- **Ink** forms on its own every minute or so: an ink blot spreading from the drops
-  that start it, a patch of grungy texture, a splash with its drops, or a dry-brush
-  stroke. Each keeps drifting faintly while it rests, then dissolves after a few
-  minutes while others form. A worldline shift throws a fresh splash and a burst of
-  leaked light.
+- **Ink** forms on its own every few seconds, a dozen or so at a time: an ink blot
+  spreading from the drops that start it, a patch of grungy texture, a splash with its
+  drops, or a dry-brush stroke. None of it sits still: each drifts away from the
+  centrepiece, meandering, turning and growing as it goes; blots and grit keep
+  spreading all their lives while their outlines creep out and back, and the pigment
+  inside keeps flowing. After a minute or so each one thins and dissolves while others
+  form. A worldline shift throws a fresh splash and a burst of leaked light.
+- **Light** falls in shafts from a source beyond the frame that travels slowly over the
+  top of the scene, from the right side to beyond the upper left corner and back (about
+  twelve minutes there and back), so the shafts and the pool of light on the clockwork
+  pan across it. Film light leaks slide along all four edges.
+- **Dust** wanders slowly every way through the air, glinting in the light shafts, and
+  specks on the lens meander about; the film grain is new every frame.
+- A signal runs along the worldline diagram now and then.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
@@ -73,7 +144,11 @@ in Lively's settings.
 - Every static part (tube glass, mesh, glow, gears, dials, textures) is rendered once into
   an image when the wallpaper starts. Each frame only moves and blends those images.
 - Each new element of ink is painted once, a few small steps per frame, then only masked
-  each frame; the whole frame takes a few milliseconds at 2560×1440.
+  (every fourth frame once it has formed); the whole frame takes a few milliseconds at
+  2560×1440.
+- The bloom works on an eighth-size copy of the frame and the grain on a half-size one.
+- Makise's sway is one small WebGL draw a frame (all three layers in one pass), at the
+  size she is shown.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
 - Rendering stops entirely while the wallpaper is paused or hidden.
 - It renders at each monitor's own resolution. The design is 2560×1440 and scales to fit,
@@ -91,7 +166,8 @@ Then open <http://localhost:5173/>. The preview shows the live wallpaper scaled 
 window, rendered at your screen's resolution or another one (1080p, 1440p, 4K, ultrawide,
 16:10), with:
 
-- the three settings, applied the way Wallpaper Engine applies them;
+- the settings (centrepiece, display, glow, shifts), applied the way Wallpaper Engine
+  applies them;
 - buttons to shift the worldline, click, pause, or form a given kind of ink right now
   (keys S, C, P and 1–4);
 - time at 1×, 5× or 25×, to watch ink form, rest and dissolve;
@@ -108,7 +184,7 @@ shows what the tubes and ink are doing.
 
 URL parameters:
 
-- Settings: `display=time|date|worldline`, `glow=orange|white`, `shift=0|1`
+- Settings: `centre=makise|nixie`, `display=time|date|worldline`, `glow=orange|white`, `shift=0|1`
 - Debug only:
   - `now=2026-10-02T10:59:55` fakes the clock
   - `still=8` renders one frame 8 s after start
@@ -123,11 +199,14 @@ URL parameters:
 Tools (the screenshot and recording tools need `tools/serve.js` running):
 
 - `tools/preview.html`: the preview above (the repo root opens it)
-- `node tools/test.js`: behaviour checks for the display, shift and ink scheduling logic
+- `node tools/test.js`: behaviour checks for the display and shifts, the ink's schedule and
+  motion, where the light comes from, and Makise's springs
 - `tools/ink.html`: elements of ink in isolation, at rest, forming or dissolving, for tuning
 - `tools/shoot.sh <page> <out.png> [query]`: headless Chrome screenshot
 - `tools/record.html`: steps the wallpaper frame by frame and saves the frames to
   `shots/frames/` (encode them with ffmpeg)
+- `python tools/swaymap.py`: rigs `img/makise.webp`: its moving layers, what's under
+  them and how far each part sways (needs Pillow)
 - `python tools/package.py`: Lively zip
 
 Code layout (`wallpaper/js`):
@@ -136,11 +215,13 @@ Code layout (`wallpaper/js`):
 | --- | --- |
 | `kit.js` | Noise, easing, canvas helpers |
 | `config.js` | Settings from the URL, Lively and Wallpaper Engine |
-| `nixie.js` | The tubes: glyphs, glass, mesh, glow, walnut base, scramble and flash |
+| `nixie.js` | The tubes: glyphs, glass, mesh, glow, walnut base, streak, scramble and flash |
+| `portrait.js` | The Makise centrepiece: loading, grading, feathering, backlight, float, breath, hair and arm springs, glitch |
+| `sway.js` | Brings the rigged Makise picture to life in WebGL: hair, jacket and body as separate layers |
 | `mech.js` | Dials, hands, gears, escapement; 3D tilt; stepped motion |
-| `paint.js` | Drafting marks, the worldline diagram, shape helpers |
-| `ink.js` | Living ink: painting, the spreading field, the schedule |
-| `atmos.js` | Dust, smoke, hot spots, light leaks, textured border, lens dust, grain |
+| `paint.js` | Drafting marks, the worldline diagram and its signal, shape helpers |
+| `ink.js` | Living ink: painting, the spreading field, motion, the schedule |
+| `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, bloom, lens dust, grain |
 | `scene.js` | Composition, depth, parallax |
 | `display.js` | What the tubes show and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |
