@@ -3,7 +3,8 @@
 // centrepiece and by soft light shafts that pan slowly across the scene, very light
 // smoke, pools of light, film light leaks sliding along the edges, a grungy textured
 // border under the vignette, a soft bloom on everything bright, dust wandering on the
-// lens and living film grain over everything.
+// lens and living film grain over everything; and the texture of a printed key visual,
+// a mottled backdrop, patches of halftone screen and a worn print over it all.
 const Atmos = (() => {
   const { TAU, canvas, rng, fbm2, pfbm2, smooth } = Kit;
 
@@ -181,35 +182,32 @@ const Atmos = (() => {
     return c;
   }
 
-  // Leak colours, hot core to fringe: mostly warm, now and then magenta.
+  // Leak colours, at the edge and at the fringe: mostly warm, now and then magenta.
   const LEAKS = [
-    { w: 0.35, stops: ['255,226,180', '255,150,70', '220,70,40'] },   // orange
-    { w: 0.25, stops: ['255,205,170', '245,95,95', '170,30,80'] },    // red
-    { w: 0.25, stops: ['255,240,190', '250,185,80', '205,100,35'] },  // amber
-    { w: 0.15, stops: ['255,210,235', '225,100,185', '120,40,150'] }, // magenta
+    { w: 0.35, stops: ['255,150,70', '220,70,40'] },   // orange
+    { w: 0.25, stops: ['245,95,95', '170,30,80'] },    // red
+    { w: 0.25, stops: ['250,185,80', '205,100,35'] },  // amber
+    { w: 0.15, stops: ['225,100,185', '120,40,150'] }, // magenta
   ];
   const EDGES = ['top', 'right', 'bottom', 'left'];
 
-  // A leak's light: a long glow, hot in the middle and turning toward its fringe colour,
-  // with a smaller glow off-centre so no two look alike.
+  // A leak's light: a long band of glow, even along most of its length with long soft
+  // ends, falling off either side of its middle line, which lies outside the frame. So
+  // inside the frame it is brightest right at the edge, the same all along, and only
+  // fades inward, turning from its edge colour toward its fringe colour as it goes.
   function leakSprite(l) {
-    const w = 160, h = 96, c = canvas(w, h), g = c.getContext('2d'), [hot, mid, rim] = l.pal.stops;
-    g.globalCompositeOperation = 'lighter';
-    const blob = (x, y, rx, ry, a) => {
-      g.save();
-      g.translate(x, y);
-      g.scale(1, ry / rx);
-      const rg = g.createRadialGradient(0, 0, 0, 0, 0, rx);
-      rg.addColorStop(0, `rgba(${hot},${a})`);
-      rg.addColorStop(0.3, `rgba(${mid},${a * 0.7})`);
-      rg.addColorStop(0.65, `rgba(${rim},${a * 0.3})`);
-      rg.addColorStop(1, `rgba(${rim},0)`);
-      g.fillStyle = rg;
-      g.fillRect(-rx, -rx, rx * 2, rx * 2);
-      g.restore();
-    };
-    blob(w / 2, h / 2, w / 2, h / 2, 0.85);
-    blob(w * l.knot[0], h * l.knot[1], w * l.knot[2], h * l.knot[2] * 1.2, 0.5);
+    const w = 256, h = 64, c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h);
+    const [mid, rim] = l.pal.stops.map(s => s.split(',').map(Number));
+    for (let y = 0; y < h; y++) {
+      const v = Math.abs((y + 0.5) / h * 2 - 1), across = Math.exp(-((v / 0.55) ** 2)) * (1 - smooth(0.8, 1, v));
+      const t = smooth(0, 0.9, v);
+      for (let x = 0; x < w; x++) {
+        const u = Math.abs((x + 0.5) / w * 2 - 1), i = (y * w + x) * 4;
+        for (let ch = 0; ch < 3; ch++) img.data[i + ch] = mid[ch] + (rim[ch] - mid[ch]) * t;
+        img.data[i + 3] = 255 * across * (1 - smooth(0.45, 1, u));
+      }
+    }
+    g.putImageData(img, 0, 0);
     return c;
   }
 
@@ -282,10 +280,10 @@ const Atmos = (() => {
       const from = 0.05 + r() * 0.9, travel = (r() < 0.5 ? -1 : 1) * (0.45 + r() * 0.4), life = 70 + r() * 50;
       this.lastEdge = edge;
       this.leaks.push({
-        edge, pal, knot: [0.3 + r() * 0.4, 0.35 + r() * 0.3, 0.18 + r() * 0.12],
+        edge, pal,
         born: t - at * life, life, fadeIn, fadeOut: 14 + r() * 8,
-        from, to: from + travel, len: 1100 + r() * 700, thick: 650 + r() * 350, out: 0.08 + r() * 0.22,
-        peak: 0.14 + r() * 0.08, ph: r() * TAU,
+        from, to: from + travel, len: 1700 + r() * 900, thick: 900 + r() * 400, out: 0.15 + r() * 0.05,
+        peak: 0.17 + r() * 0.07, ph: r() * TAU,
       });
       return this.leaks[this.leaks.length - 1];
     }
@@ -537,12 +535,203 @@ const Atmos = (() => {
         const fine = fbm2(x * f / 40, y * f / 40, seed + 9, 3);
         const i = (y * w + x) * 4;
         img.data[i] = 3; img.data[i + 1] = 2; img.data[i + 2] = 2;
-        img.data[i + 3] = 255 * Math.min(1, mask * (0.2 + 0.8 * blot) * (0.75 + 0.5 * fine) * 0.85);
+        img.data[i + 3] = 255 * Math.min(1, mask * (0.2 + 0.8 * blot) * (0.75 + 0.5 * fine) * 0.75);
       }
     }
     g.putImageData(img, 0, 0);
     return c;
   }
 
-  return { Dust, Smoke, Light, LensDust, Grain, Bloom, grunge };
+  // ---------- Backdrop: the dark behind everything, mottled like a sprayed wall ----------
+  // An even tone with soft clouds in it and darker spots with ragged edges, as in the key
+  // art the wallpaper follows. Two tileable textures at an eighth of the resolution, each
+  // wider than the frame, slide slowly past each other, multiplied together, so the spots
+  // keep changing shape. It eases off a little toward the centrepiece, which keeps the eye
+  // there.
+  function mottle(n, seed) {
+    const c = canvas(n, n), g = c.getContext('2d'), img = g.createImageData(n, n), P = 4;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const u = x / n * P, v = y / n * P;
+        const wx = pfbm2(u, v, P, seed, 3), wy = pfbm2(u + 5.2, v + 1.3, P, seed + 3, 3);
+        const cloud = pfbm2(u + wx * 1.4, v + wy * 1.4, P, seed + 7, 4);
+        const spot = smooth(0.57, 0.63, pfbm2(u * 2 + wy * 2, v * 2 + wx * 2, P * 2, seed + 11, 4));
+        const val = Math.max(0.05, Math.min(1, 0.75 + 1.1 * (cloud - 0.5))) * (1 - 0.8 * spot);
+        const i = (y * n + x) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = 255 * val;
+        img.data[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
+  class Backdrop {
+    constructor(seed = 23) { this.seed = seed; this.cam = { x: 0, y: 0 }; }
+    // `focus`: the centrepiece's pool of negative space (design px: centre and radii).
+    build(view, focus) {
+      const k = this.k = 1 / 8, w = Math.ceil(view.W * k), h = Math.ceil(view.H * k);
+      this.layer = canvas(w, h);
+      if (!this.tiles) this.tiles = [mottle(192, this.seed), mottle(192, this.seed + 1)];
+      // How much of it to take away around the centrepiece: some, not all.
+      this.calm = canvas(w, h);
+      const g = this.calm.getContext('2d'), cx = (view.ox + focus.x * view.S) * k, cy = (view.oy + focus.y * view.S) * k;
+      g.setTransform(1, 0, 0, focus.ry / focus.rx, cx, cy);
+      const rg = g.createRadialGradient(0, 0, 0, 0, 0, focus.rx * 0.75 * view.S * k);
+      rg.addColorStop(0, 'rgba(0,0,0,0.45)');
+      rg.addColorStop(0.5, 'rgba(0,0,0,0.3)');
+      rg.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = rg;
+      g.fillRect(-w * 2, -h * 4, w * 4, h * 8);
+    }
+    // `a`: how strongly it lifts the dark.
+    draw(ctx, view, t, a) {
+      const g = this.layer.getContext('2d'), w = this.layer.width, h = this.layer.height, s = view.S * this.k;
+      // Each texture: how big a tile is and how fast it slides (design px), and how much it
+      // drifts with the cursor.
+      [[2800, 2.4, -1.1, 0.7], [2000, -1.7, 0.8, 0.9]].forEach(([size, vx, vy, par], i) => {
+        const tile = this.tiles[i], pat = g.createPattern(tile, 'repeat');
+        pat.setTransform(new DOMMatrix()
+          .translate((t * vx + this.cam.x * 42 * par) * s, (t * vy + this.cam.y * 42 * par * 0.7) * s)
+          .scale(size * s / tile.width));
+        g.globalCompositeOperation = i ? 'multiply' : 'copy';
+        g.fillStyle = pat;
+        g.fillRect(0, 0, w, h);
+      });
+      g.globalCompositeOperation = 'multiply';
+      g.fillStyle = 'rgb(255,214,188)';
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'destination-out';
+      g.drawImage(this.calm, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = a;
+      ctx.drawImage(this.layer, 0, 0, view.W, view.H);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- Print: the texture of a worn, printed key visual, over everything ----------
+  // Like the paper and wear of a printed poster: broad blotches where the ink lies heavier
+  // or is rubbed thin, softer darker patches and a few fine scratches. Baked once and
+  // large, so it reads as a surface rather than detail; it stays put, like paper.
+
+  // The wear, as a soft-light layer: mid grey changes nothing, darker darkens, lighter
+  // lightens. It leans dark, so it adds texture without lifting the blacks.
+  function wearTile(n, seed) {
+    const c = canvas(n, n), g = c.getContext('2d'), img = g.createImageData(n, n), P = 4;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const u = x / n * P, v = y / n * P;
+        const wx = pfbm2(u, v, P, seed, 3), wy = pfbm2(u + 3.7, v + 8.1, P, seed + 5, 3);
+        const broad = pfbm2(u, v, P, seed + 9, 3) - 0.5;
+        const patch = smooth(0.56, 0.64, pfbm2(u * 2 + wx * 2.5, v * 2 + wy * 2.5, P * 2, seed + 13, 3));
+        const rub = smooth(0.6, 0.7, pfbm2(u * 2 + wy * 2, v * 2 + wx * 2, P * 2, seed + 17, 3));
+        const i = (y * n + x) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = 124 + 56 * broad - 44 * patch + 24 * rub;
+        img.data[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
+  class Print {
+    constructor(seed = 47) { this.seed = seed; }
+
+    build(view) {
+      const k = 0.5, W = Math.ceil(view.W * k), H = Math.ceil(view.H * k), s = view.S * k, r = rng(this.seed);
+      const X = x => (view.ox * k) + x * s, Y = y => (view.oy * k) + y * s;
+      if (!this.tile) this.tile = wearTile(384, this.seed);
+      this.wear = canvas(W, H);
+      const g = this.wear.getContext('2d'), pat = g.createPattern(this.tile, 'repeat');
+      pat.setTransform(new DOMMatrix().scale(2200 * s / this.tile.width));
+      g.fillStyle = pat;
+      g.fillRect(0, 0, W, H);
+      // A few long, fine scratches.
+      this.scratches = canvas(W, H);
+      const f = this.scratches.getContext('2d');
+      f.strokeStyle = 'rgb(236,228,216)';
+      f.lineCap = 'round';
+      for (let i = 0; i < 10; i++) {
+        const x0 = r() * 2560, y0 = r() * 1440, a = r() * TAU, len = 160 + r() * 360, bend = (r() - 0.5) * len * 0.3;
+        const x1 = x0 + Math.cos(a) * len, y1 = y0 + Math.sin(a) * len;
+        f.globalAlpha = 0.12 + r() * 0.2;
+        f.lineWidth = Math.max(0.5, (0.5 + r() * 0.6) * s);
+        f.beginPath();
+        f.moveTo(X(x0), Y(y0));
+        f.quadraticCurveTo(X((x0 + x1) / 2 - Math.sin(a) * bend), Y((y0 + y1) / 2 + Math.cos(a) * bend), X(x1), Y(y1));
+        f.stroke();
+      }
+      f.globalAlpha = 1;
+    }
+
+    // `wear` and `scratches`: how strong each is.
+    draw(ctx, view, { wear, scratches }) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'soft-light';
+      ctx.globalAlpha = wear;
+      ctx.drawImage(this.wear, 0, 0, view.W, view.H);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = scratches;
+      ctx.drawImage(this.scratches, 0, 0, view.W, view.H);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- Tone: patches of a halftone screen ----------
+  // A 45-degree grid of dots laid in a few soft patches, like screentone cut and laid on a
+  // printed key visual: the dots are largest in the middle of a patch and shrink to nothing
+  // toward its ragged edge. Baked once over the patches' bounds.
+  class Tone {
+    // `cell`: how far apart the dots are (design px); `color` and `blend`: how they lay
+    // over; `res`: the bake's px per screen px.
+    constructor({ cell, color, blend, res = 0.5, seed = 61 }) {
+      Object.assign(this, { cell, color, blend, res, seed });
+    }
+
+    // `patches`: [{ x, y, rx, ry, a }] in design px, `a` how far toward solid the middle
+    // of each gets.
+    build(view, patches) {
+      const { cell } = this, s = view.S * this.res, pad = cell * 2;
+      const x0 = Math.min(...patches.map(p => p.x - p.rx)) - pad, x1 = Math.max(...patches.map(p => p.x + p.rx)) + pad;
+      const y0 = Math.min(...patches.map(p => p.y - p.ry)) - pad, y1 = Math.max(...patches.map(p => p.y + p.ry)) + pad;
+      this.box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      this.layer = canvas(Math.ceil(this.box.w * s), Math.ceil(this.box.h * s));
+      const g = this.layer.getContext('2d'), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      g.fillStyle = this.color;
+      const reach = Math.hypot(this.box.w, this.box.h) / 2 / cell + 2, c = Math.SQRT1_2;
+      for (let j = -reach; j <= reach; j++) {
+        for (let i = -reach; i <= reach; i++) {
+          const x = cx + (i - j) * c * cell, y = cy + (i + j) * c * cell;
+          if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+          // How dark the screen is here: full in the middle of a patch, fading out, the
+          // edge torn by noise.
+          const ragged = (fbm2(x / 240 + 3.1, y / 240 + 7.7, this.seed, 3) - 0.5) * 0.55;
+          let tone = 0;
+          for (const p of patches) tone = Math.max(tone, p.a * (1 - smooth(0, 1, Math.hypot((x - p.x) / p.rx, (y - p.y) / p.ry) + ragged)));
+          const rad = cell * 0.5 * Math.pow(tone, 0.75) * s;
+          if (rad < 0.25) continue;
+          g.beginPath();
+          g.arc((x - x0) * s, (y - y0) * s, rad, 0, TAU);
+          g.fill();
+        }
+      }
+    }
+
+    // `a`: how strongly it shows; `off`: where it has moved to (design px).
+    draw(ctx, view, a, off = { x: 0, y: 0 }) {
+      const b = this.box;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = this.blend;
+      ctx.globalAlpha = a;
+      ctx.drawImage(this.layer, view.ox + (b.x + off.x) * view.S, view.oy + (b.y + off.y) * view.S, b.w * view.S, b.h * view.S);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  return { Dust, Smoke, Light, LensDust, Grain, Bloom, Backdrop, Tone, Print, grunge };
 })();

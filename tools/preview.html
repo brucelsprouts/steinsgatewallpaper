@@ -2,7 +2,7 @@
 <!-- Preview: the live wallpaper scaled to fit this window, with its settings and
      buttons to make things happen now. Serve the repo (node tools/serve.js) and open
      http://localhost:5173/ (from a file:// page the buttons can't reach the wallpaper).
-     Keys: S shift, C click, 1-4 ink, P pause, H hide the controls, F full screen. -->
+     Keys: S shift, C click, 1-3 ink, P pause, H hide the controls, F full screen. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -81,6 +81,10 @@
     <span class="label">Ink</span>
     <input data-key="ink" type="range" min="0" max="100" step="5" aria-label="Ink strength"><output></output>
   </div>
+  <div class="group" title="How strong the printed texture is: the mottled backdrop, the halftone patches and the worn print over everything. 50 as designed">
+    <span class="label">Texture</span>
+    <input data-key="texture" type="range" min="0" max="100" step="5" aria-label="Texture strength"><output></output>
+  </div>
   <div class="group">
     <span class="label">Motion</span>
     <div class="seg" data-key="motion"><button data-v="true">On</button><button data-v="false">Off</button></div>
@@ -104,7 +108,6 @@
     <button data-ink="blot" title="Form a blot now (1)">Blot</button>
     <button data-ink="grit" title="Form a patch of grungy texture now (2)">Grit</button>
     <button data-ink="splash" title="Throw a splash now (3)">Splash</button>
-    <button data-ink="stroke" title="Paint a stroke now (4)">Stroke</button>
   </div>
   <div class="group">
     <span class="label">Speed</span>
@@ -126,7 +129,7 @@
     <button data-act="png" title="Save this frame at full size">Save PNG</button>
     <a class="link" href="rig.html" title="Paint how Makise moves">Rig editor</a>
   </div>
-  <div id="status"><span id="info">loading…</span><span id="msg"></span><span id="keys">S shift · C click · 1–4 ink · P pause · H hide · F full screen</span></div>
+  <div id="status"><span id="info">loading…</span><span id="msg"></span><span id="keys">S shift · C click · 1–3 ink · P pause · H hide · F full screen</span></div>
 </div>
 <script>
 'use strict';
@@ -138,12 +141,13 @@ const dpr = window.devicePixelRatio || 1;
 // link) comes back to the same view. Paint left unset follows the wallpaper's default.
 const q = new URLSearchParams(location.search);
 const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
-const SETTINGS = ['centre', 'glow', 'glowSize', 'ink', 'motion', 'parallax', 'shift'];
+const SETTINGS = ['centre', 'glow', 'glowSize', 'ink', 'texture', 'motion', 'parallax', 'shift'];
 const st = {
   centre: ['makise', 'time', 'date', 'worldline'].includes(q.get('centre')) ? q.get('centre') : 'makise',
   glow: num('glow', 50),
   glowSize: num('glowSize', 50),
   ink: num('ink', 50),
+  texture: num('texture', 50),
   motion: q.get('motion') !== 'false',
   parallax: q.get('parallax') !== 'false',
   shift: q.get('shift') !== 'false',
@@ -306,7 +310,7 @@ document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click',
 document.querySelectorAll('[data-ink]').forEach(b => b.addEventListener('click', () => actions.ink(b.dataset.ink)));
 
 const KEYS = { s: 'shift', c: 'click', p: 'pause', h: 'hide', f: 'full' };
-const INK_KEYS = { 1: 'blot', 2: 'grit', 3: 'splash', 4: 'stroke' };
+const INK_KEYS = { 1: 'blot', 2: 'grit', 3: 'splash' };
 function onKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
   if (e.target.closest?.('input, select, textarea')) return;

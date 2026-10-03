@@ -40,32 +40,42 @@
         "max": 100,
         "value": 50
       },
-      "motion": {
+      "texture": {
         "order": 103,
+        "text": "Texture strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "motion": {
+        "order": 104,
         "text": "Makise motion",
         "type": "bool",
         "value": true,
         "condition": "centre.value == 'makise'"
       },
       "parallax": {
-        "order": 104,
+        "order": 105,
         "text": "Cursor parallax",
         "type": "bool",
         "value": true
       },
       "shift": {
-        "order": 105,
+        "order": 106,
         "text": "Worldline shifts",
         "type": "bool",
         "value": true
       }
     }
   },
-  "preview": "preview.jpg",
+  "preview": "preview.gif",
   "tags": [
-    "Anime"
+    "Anime",
+    "Game",
+    "Sci-Fi"
   ],
-  "title": "Divergence Meter",
+  "title": "Steins;Gate — Divergence Meter & Makise Kurisu",
   "type": "web",
   "visibility": "private"
 }

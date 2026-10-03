@@ -1,7 +1,6 @@
 'use strict';
-// Drafted overlays in the spirit of mixed-media anime illustration: drafting marks and
-// a faint worldline (attractor field) diagram, baked once. Also the organic shape
-// helpers that the living ink (ink.js) is painted with.
+// Drafted overlays in the spirit of mixed-media anime illustration: drafting marks, baked
+// once. Also the organic shape helpers that the living ink (ink.js) is painted with.
 const Paint = (() => {
   const { TAU, canvas, rng } = Kit;
 
@@ -42,44 +41,6 @@ const Paint = (() => {
     });
   }
 
-  // Attractor field: worldlines that braid and pinch together at attractor points.
-  function worldlines(g, seed, o) {
-    const r = rng(seed);
-    const W = o.width, H = o.height, n = o.lines ?? 13;
-    const pinches = o.pinches ?? [0.22, 0.58, 0.86];
-    g.strokeStyle = `rgb(${o.color || COLORS.white})`;
-    g.fillStyle = g.strokeStyle;
-    for (let i = 0; i < n; i++) {
-      const lane = (i / (n - 1) - 0.5) * H, main = i === Math.floor(n / 2);
-      const ph = r() * TAU, fq = 2 + r() * 3, pts = [];
-      g.lineWidth = main ? 1.6 : 0.8;
-      g.globalAlpha = main ? 1 : 0.35 + r() * 0.45;
-      g.beginPath();
-      for (let x = 0; x <= W; x += 6) {
-        const u = x / W;
-        let env = 1;
-        for (const p of pinches) env *= 1 - 0.85 * Math.exp(-((u - p) ** 2) / 0.0035);
-        const y = lane * env + Math.sin(u * fq * TAU + ph) * H * 0.04 * env;
-        x ? g.lineTo(x - W / 2, y) : g.moveTo(x - W / 2, y);
-        pts.push([x - W / 2, y]);
-      }
-      g.stroke();
-      if (main && o.info) o.info.path = pts; // the main worldline, for the signal that runs along it
-    }
-    // Attractor nodes and tiny annotations.
-    g.globalAlpha = 0.9;
-    g.font = `${o.font ?? 13}px "Consolas", "Courier New", monospace`;
-    g.textBaseline = 'bottom';
-    const labels = o.labels ?? ['α  0.571024', 'β  1.130205', '1.048596'];
-    pinches.forEach((p, k) => {
-      const x = p * W - W / 2;
-      g.beginPath(); g.arc(x, 0, 3.2, 0, TAU); g.stroke();
-      g.beginPath(); g.moveTo(x, -H * 0.62); g.lineTo(x, -H * 0.12); g.stroke();
-      if (labels[k]) g.fillText(labels[k], x + 6, -H * 0.5);
-    });
-    g.globalAlpha = 1;
-  }
-
   // Registration marks, crosshairs and a dotted arc: the instrument-drawing layer.
   function marks(g, seed, o) {
     const r = rng(seed);
@@ -99,58 +60,25 @@ const Paint = (() => {
   }
 
   const KINDS = {
-    worldlines: (g, o) => worldlines(g, o.seed, o),
     marks: (g, o) => marks(g, o.seed, o),
   };
 
   // A placed overlay: baked once, drawn each frame with parallax and slow breathing.
-  // `glow` adds a soft halo to its linework; `pulse` (worldlines) sends a signal along
-  // the main worldline now and then.
   class Overlay {
     constructor(o) {
-      Object.assign(this, { x: 0, y: 0, depth: 0, blur: 0, res: 1, alpha: 0.12, rot: 0, op: 'screen', drift: 8, seed: 1, breathe: 0, glow: 0, pulse: false }, o);
+      Object.assign(this, { x: 0, y: 0, depth: 0, blur: 0, res: 1, alpha: 0.12, rot: 0, op: 'screen', drift: 8, seed: 1, breathe: 0 }, o);
       this.cam = { x: 0, y: 0 };
     }
 
     // Half-extents of the baked art around its centre.
-    bounds() {
-      return this.kind === 'worldlines'
-        ? [this.width / 2 + 130, this.height * 0.7 + 20]
-        : [this.spread / 2 + 24, this.spread * 0.35 + 24];
-    }
+    bounds() { return [this.spread / 2 + 24, this.spread * 0.35 + 24]; }
 
     build(S) {
       const [hw0, hh0] = this.bounds(), pad = this.blur * 3 + 4, k = S * this.res;
       const hw = hw0 + pad, hh = hh0 + pad;
       const c = canvas(hw * 2 * k, hh * 2 * k), g = c.getContext('2d');
       g.setTransform(k, 0, 0, k, hw * k, hh * k);
-      const info = {};
-      KINDS[this.kind](g, { ...this, color: COLORS[this.color] || this.color, info });
-      this.path = info.path || null;
-      if (this.fade > 0) {
-        // Dissolve the left and right ends, so the linework emerges from the dark rather than stopping.
-        const x0 = (hw - this.width / 2) * k, x1 = (hw + this.width / 2) * k;
-        const fg = g.createLinearGradient(x0, 0, x1, 0), f = this.fade;
-        [[0, 0], [f * 0.5, 0.35], [f, 1], [1 - f, 1], [1 - f * 0.5, 0.35], [1, 0]]
-          .forEach(([at, op]) => fg.addColorStop(at, `rgba(0,0,0,${op})`));
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        g.globalCompositeOperation = 'destination-in';
-        g.fillStyle = fg;
-        g.fillRect(0, 0, c.width, c.height);
-        g.globalCompositeOperation = 'source-over';
-      }
-      if (this.behind) {
-        // Fade out inside a circle (design px), so the linework seems to pass behind a dial.
-        const { x, y, r, soft = 60 } = this.behind, cx = (hw + x - this.x) * k, cy = (hh + y - this.y) * k;
-        const bg = g.createRadialGradient(cx, cy, Math.max(0, r - soft) * k, cx, cy, (r + soft) * k);
-        bg.addColorStop(0, 'rgba(0,0,0,1)');
-        bg.addColorStop(1, 'rgba(0,0,0,0)');
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        g.globalCompositeOperation = 'destination-out';
-        g.fillStyle = bg;
-        g.fillRect(0, 0, c.width, c.height);
-        g.globalCompositeOperation = 'source-over';
-      }
+      KINDS[this.kind](g, { ...this, color: COLORS[this.color] || this.color });
       let out = c;
       if (this.blur > 0) {
         out = canvas(c.width, c.height);
@@ -158,28 +86,7 @@ const Paint = (() => {
         bg.filter = `blur(${this.blur * k}px)`;
         bg.drawImage(c, 0, 0);
       }
-      if (this.glow > 0) {
-        // A soft halo under the linework, so it reads as faint light rather than ink.
-        const gl = canvas(out.width, out.height), gg = gl.getContext('2d');
-        gg.filter = `blur(${Math.max(1, 3 * k)}px)`;
-        gg.globalAlpha = Math.min(1, this.glow);
-        gg.drawImage(out, 0, 0);
-        gg.filter = 'none';
-        gg.globalAlpha = 1;
-        gg.globalCompositeOperation = 'lighter';
-        gg.drawImage(out, 0, 0);
-        out = gl;
-      }
       this.sp = { c: out, hw, hh };
-      if (this.pulse && !this.dot) {
-        const R = 32, d = canvas(R * 2, R * 2), dg = d.getContext('2d'), rg = dg.createRadialGradient(R, R, 0, R, R, R);
-        rg.addColorStop(0, 'rgba(255,242,224,1)');
-        rg.addColorStop(0.22, 'rgba(255,200,150,0.55)');
-        rg.addColorStop(1, 'rgba(255,170,110,0)');
-        dg.fillStyle = rg;
-        dg.fillRect(0, 0, R * 2, R * 2);
-        this.dot = d;
-      }
     }
 
     draw(ctx, view, t) {
@@ -192,27 +99,7 @@ const Paint = (() => {
       ctx.globalAlpha = Math.max(0, Math.min(1, a));
       ctx.setTransform(S * c, S * s, -S * s, S * c, view.ox + (this.x + dx) * S, view.oy + (this.y + dy) * S);
       ctx.drawImage(this.sp.c, -this.sp.hw, -this.sp.hh, this.sp.hw * 2, this.sp.hh * 2);
-      if (this.pulse && this.path) this.signal(ctx, t, a);
       ctx.globalCompositeOperation = 'source-over';
-    }
-
-    // Every so often a signal runs the length of the main worldline, through each
-    // attractor, with a short trail behind it. Drawn in the overlay's own frame.
-    signal(ctx, t, a) {
-      const PERIOD = 19, RUN = 10;
-      const u = ((t + this.seed * 3.7) % PERIOD) / RUN;
-      if (u >= 1) return;
-      const path = this.path, n = path.length - 1, env = Math.sin(Math.PI * u);
-      ctx.globalCompositeOperation = 'screen';
-      for (let k = 0; k < 8; k++) {
-        const p = u * n - k * 2;
-        if (p < 0) break;
-        const i = Math.min(n - 1, Math.floor(p)), f = p - i;
-        const x = path[i][0] + (path[i + 1][0] - path[i][0]) * f, y = path[i][1] + (path[i + 1][1] - path[i][1]) * f;
-        const size = k ? 26 * (1 - k * 0.08) : 40;
-        ctx.globalAlpha = Math.min(1, env * a * (k ? 1.4 * (1 - k / 8) : 2.4));
-        ctx.drawImage(this.dot, x - size / 2, y - size / 2, size, size);
-      }
     }
   }
 

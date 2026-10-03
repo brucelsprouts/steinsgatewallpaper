@@ -40,6 +40,15 @@
   const controller = new Display.Controller(meter, clock);
   const smoke = new Atmos.Smoke(), light = new Atmos.Light(Kit.rng(seed + 7)), lens = new Atmos.LensDust();
   const grain = new Atmos.Grain(), bloom = new Atmos.Bloom();
+  // The texture of a printed key visual, kept quiet so it stays in the background: a
+  // mottled backdrop behind everything, a screentone of pale dots in the pool of dark
+  // around the centrepiece, a finer halftone on Makise's coat and a worn print over it
+  // all. The setting (0-100, 50 as designed) scales them all.
+  const backdrop = new Atmos.Backdrop(), print = new Atmos.Print();
+  const screen = new Atmos.Tone({ cell: 12, color: 'rgb(228,218,206)', blend: 'screen' });
+  const onMakise = new Atmos.Tone({ cell: 7, color: 'rgb(60,60,60)', blend: 'soft-light', res: 1, seed: 67 });
+  const texture = () => Config.get('texture') / 50;
+  backdrop.cam = scene.dust.cam;
   smoke.cam = light.cam = scene.dust.cam; // they drift with the near air
   scene.dust.beam = (x, y, t) => light.beamAt(x, y, t); // dust glints in the light shafts
   // Clocks spin on every shift and click, and the picture flickers; a real worldline
@@ -65,6 +74,16 @@
     if (makise) portrait.build(view.S, theme());
     scene.build(view.S, view, theme(), f);
     smoke.build(view, f);
+    backdrop.build(view, f);
+    // The screentone: around the middle of the centrepiece, and out into the empty strip
+    // down the left edge.
+    // The screentone and the halftone are Makise's alone.
+    if (makise) {
+      screen.build(view, [{ x: f.x, y: f.y + 40, rx: 560, ry: 460, a: 0.9 }, { x: 70, y: 600, rx: 300, ry: 290, a: 0.85 }]);
+      // The halftone on Makise: her coat on either side.
+      onMakise.build(view, [{ x: 850, y: 800, rx: 170, ry: 240, a: 0.8 }, { x: 330, y: 900, rx: 120, ry: 180, a: 0.7 }]);
+    }
+    print.build(view);
     light.build(view);
     grunge = Atmos.grunge(view);
     liftCorners(grunge, 0.6, 0.5);
@@ -78,16 +97,16 @@
     const r = g.createRadialGradient(W * k / 2, H * k / 2, H * k * 0.3, W * k / 2, H * k / 2, W * k * 0.62);
     for (let i = 0; i <= 12; i++) {
       const x = i / 12;
-      r.addColorStop(x, `rgba(0,0,0,${(0.9 * x * x * (3 - 2 * x)).toFixed(4)})`);
+      r.addColorStop(x, `rgba(0,0,0,${(0.82 * x * x * (3 - 2 * x)).toFixed(4)})`);
     }
     g.fillStyle = r;
     g.fillRect(0, 0, W * k, H * k);
     liftCorners(vignette, 0.55, 0.45);
   }
 
-  // Ease a darkening layer off in the left-hand corners, so the clockwork and worldlines
-  // beside the centrepiece aren't lost. `top` and `bottom` are how much of it to take
-  // away at the very corner; where the two meet, halfway down the edge, a little goes too.
+  // Ease a darkening layer off in the left-hand corners, so the clockwork beside the
+  // centrepiece isn't lost. `top` and `bottom` are how much of it to take away at the
+  // very corner; where the two meet, halfway down the edge, a little goes too.
   function liftCorners(c, top, bottom) {
     const g = c.getContext('2d');
     g.globalCompositeOperation = 'destination-out';
@@ -123,20 +142,29 @@
     ctx.fillStyle = '#040303';
     ctx.fillRect(0, 0, view.W, view.H);
     scene.drawBehind(ctx, view, t, now);
-    const m = scene.meterOffset(t);
-    if (centre() === 'makise') portrait.draw(ctx, view, t, m);
-    else meter.draw(ctx, { ...view, ox: view.ox + m.x * view.S, oy: view.oy + m.y * view.S }, t);
+    // The backdrop and the screentone go in after the pool of dark the scene keeps around
+    // the centrepiece, so they reach the whole frame and show in that pool; the backdrop
+    // eases off around the centrepiece by itself. The screentone and the halftone on
+    // Makise move with the centrepiece.
+    const tx = texture(), m = scene.meterOffset(t), makise = centre() === 'makise';
+    if (tx > 0) backdrop.draw(ctx, view, t, 0.045 * tx);
+    if (makise) {
+      if (tx > 0) screen.draw(ctx, view, 0.085 * tx, m);
+      portrait.draw(ctx, view, t, m);
+      if (tx > 0) onMakise.draw(ctx, view, 0.45 * tx, m);
+    } else meter.draw(ctx, { ...view, ox: view.ox + m.x * view.S, oy: view.oy + m.y * view.S }, t);
     scene.drawFront(ctx, view, t, now);
     // Light pooling on the clockwork, shafts of light and a haze of smoke, a bloom on
-    // everything bright, then the textured border and the vignette. Over those, as if on
-    // the film and the lens: light leaks, dust and grain (which also hides 8-bit banding
-    // in the dark gradients).
+    // everything bright, then the textured border, the vignette and the worn print over
+    // it all. Over those, as if on the film and the lens: light leaks, dust and grain
+    // (which also hides 8-bit banding in the dark gradients).
     light.draw(ctx, view, t, 'hot');
     light.draw(ctx, view, t, 'rays');
     smoke.draw(ctx, view, t);
     bloom.draw(ctx, cv, view);
     ctx.drawImage(grunge, 0, 0, view.W, view.H);
     ctx.drawImage(vignette, 0, 0, view.W, view.H);
+    if (tx > 0) print.draw(ctx, view, { wear: 0.25 * tx, scratches: 0.2 * tx });
     light.draw(ctx, view, t, 'leak');
     lens.draw(ctx, view, t);
     grain.draw(ctx, view);

@@ -22,16 +22,28 @@ const Mech = (() => {
     tilt: (rx, ry) => [Math.cos(ry), 0, Math.sin(rx) * Math.sin(ry), Math.cos(rx), 0, 0],
   };
 
-  // Bake a centred drawing of radius R into a sprite, optionally blurred.
-  function bake(R, S, res, blur, draw) {
-    const pad = blur * 3 + 4, half = R + pad, k = S * res;
+  // The soft halo baked around line art (not the solid silhouettes): its radius in design
+  // px and how strong it is. Small, so the clockwork lifts out of the dark without the
+  // scene looking filtered.
+  const GLOW = { r: 5, a: 2 };
+
+  // Bake a centred drawing of radius R into a sprite, optionally blurred and with a halo
+  // of its own light (`glow`, as GLOW).
+  function bake(R, S, res, blur, draw, glow = null) {
+    const pad = Math.max(blur, glow ? glow.r : 0) * 3 + 4, half = R + pad, k = S * res;
     const c = canvas(half * 2 * k, half * 2 * k);
     const g = c.getContext('2d');
     g.setTransform(k, 0, 0, k, half * k, half * k);
     draw(g);
-    if (blur <= 0) return { c, half };
+    if (blur <= 0 && !glow) return { c, half };
     const b = canvas(c.width, c.height), bg = b.getContext('2d');
-    bg.filter = `blur(${blur * k}px)`;
+    bg.globalCompositeOperation = 'lighter';
+    if (glow) {
+      bg.filter = `blur(${glow.r * k}px)`;
+      for (let a = glow.a; a > 0; a--) { bg.globalAlpha = Math.min(1, a); bg.drawImage(c, 0, 0); }
+      bg.globalAlpha = 1;
+    }
+    bg.filter = blur > 0 ? `blur(${blur * k}px)` : 'none';
     bg.drawImage(c, 0, 0);
     return { c: b, half };
   }
@@ -79,6 +91,28 @@ const Mech = (() => {
       g.save();
       g.rotate(i / 12 * TAU);
       g.fillText(ROMAN[i], 0, -r * 0.8);
+      g.restore();
+    }
+  }
+
+  // A degree scale, as on an astrolabe: fine ticks every two degrees between two rings,
+  // longer every ten, numbered every thirty.
+  function drawScale(g, r, lw) {
+    g.lineCap = 'round';
+    ring(g, r, lw * 1.2);
+    ring(g, r * 0.93, lw * 0.6);
+    for (let i = 0; i < 180; i++) {
+      const ten = i % 5 === 0;
+      g.lineWidth = lw * (ten ? 1 : 0.5);
+      spoke(g, i / 180 * TAU, r * (ten ? 0.93 : 0.955), r * 0.985);
+    }
+    g.font = `${r * 0.05}px "Times New Roman", Georgia, serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (let i = 0; i < 12; i++) {
+      g.save();
+      g.rotate(i / 12 * TAU);
+      g.fillText(String(i * 30), 0, -r * 0.89);
       g.restore();
     }
   }
@@ -352,7 +386,7 @@ const Mech = (() => {
     constructor(o) {
       Object.assign(this, {
         x: 0, y: 0, depth: 0, blur: 0, res: 1, alpha: 0.12, rx: 0, ry: 0, roll: 0,
-        drift: 12, seed: 1, beat: { period: 2, dur: 0.7, teeth: 0.25 }, parts: [], shine: 0.5,
+        drift: 12, seed: 1, beat: { period: 2, dur: 0.7, teeth: 0.25 }, parts: [], shine: 0.5, glow: GLOW,
       }, o);
       this.cam = { x: 0, y: 0 };
       this.linkGears();
@@ -388,32 +422,34 @@ const Mech = (() => {
     }
 
     build(S, pal) {
-      const { blur, res } = this;
+      const { blur, res, glow } = this;
       const col = `rgb(${pal.line})`;
       const paint = fn => g => { g.strokeStyle = g.fillStyle = col; fn(g); };
       for (const p of this.parts) {
         if (p.type === 'gear') {
-          p.sp = bake(p.G.r, S, res, blur, g => drawGear(g, p.G, p, pal));
+          p.sp = bake(p.G.r, S, res, blur, g => drawGear(g, p.G, p, pal), p.style === 'solid' ? null : glow);
           if (this.shine > 0) p.shineSp = bake(p.G.r, S, Math.min(res, 0.4), blur + p.G.r * 0.02, g => drawShine(g, p.G.r, false));
         } else if (p.type === 'dial') {
           const w = Math.max(1.2, p.r * 0.004);
           p.rings = [];
-          p.rings.push({ sp: bake(p.r, S, res, blur, paint(g => drawChapter(g, p.r, w, p.numerals !== false))), turn: p.turn ?? 0 });
-          if (p.ring24) p.rings.push({ sp: bake(p.r * 0.72, S, res, blur, paint(g => drawRing24(g, p.r * 0.72, w))), turn: -(p.turn ?? 1) * 0.7 });
-          if (p.track !== false) p.rings.push({ sp: bake(p.r * 0.6, S, res, blur, paint(g => drawTrack(g, p.r * 0.6, w))), turn: (p.turn ?? 1) * 0.4 });
+          // `face: 'scale'` swaps the chapter ring for a degree scale.
+          const face = p.face === 'scale' ? g => drawScale(g, p.r, w) : g => drawChapter(g, p.r, w, p.numerals !== false);
+          p.rings.push({ sp: bake(p.r, S, res, blur, paint(face), glow), turn: p.turn ?? 0 });
+          if (p.ring24) p.rings.push({ sp: bake(p.r * 0.72, S, res, blur, paint(g => drawRing24(g, p.r * 0.72, w)), glow), turn: -(p.turn ?? 1) * 0.7 });
+          if (p.track !== false) p.rings.push({ sp: bake(p.r * 0.6, S, res, blur, paint(g => drawTrack(g, p.r * 0.6, w)), glow), turn: (p.turn ?? 1) * 0.4 });
           if (this.shine > 0) p.shineSp = bake(p.r, S, Math.min(res, 0.4), blur + p.r * 0.04, g => drawShine(g, p.r, true));
           if (p.hands !== false) {
             p.hand = {
-              h: bake(p.r * 0.5, S, res, blur, paint(g => drawHand(g, p.r * 0.48, p.r * 0.028, w * 1.2, 'hour'))),
-              m: bake(p.r * 0.76, S, res, blur, paint(g => drawHand(g, p.r * 0.74, p.r * 0.02, w * 1.1, 'minute'))),
+              h: bake(p.r * 0.5, S, res, blur, paint(g => drawHand(g, p.r * 0.48, p.r * 0.028, w * 1.2, 'hour')), glow),
+              m: bake(p.r * 0.76, S, res, blur, paint(g => drawHand(g, p.r * 0.74, p.r * 0.02, w * 1.1, 'minute')), glow),
             };
-            if (p.seconds) p.hand.s = bake(p.r * 0.86, S, res, blur, paint(g => drawHand(g, p.r * 0.84, p.r * 0.012, w * 0.9, 'second')));
+            if (p.seconds) p.hand.s = bake(p.r * 0.86, S, res, blur, paint(g => drawHand(g, p.r * 0.84, p.r * 0.012, w * 0.9, 'second')), glow);
           }
         } else if (p.type === 'pallet') {
-          p.sp = bake(p.L * 1.15, S, res, blur, paint(g => drawPallet(g, p.L, 1.4, pal)));
+          p.sp = bake(p.L * 1.15, S, res, blur, paint(g => drawPallet(g, p.L, 1.4, pal)), glow);
         } else if (p.type === 'balance') {
-          p.sp = bake(p.r * 1.1, S, res, blur, paint(g => drawBalance(g, p.r, 1.4, pal)));
-          p.springSp = bake(p.r, S, res, blur, paint(g => drawHairspring(g, p.r, 1.4)));
+          p.sp = bake(p.r * 1.1, S, res, blur, paint(g => drawBalance(g, p.r, 1.4, pal)), glow);
+          p.springSp = bake(p.r, S, res, blur, paint(g => drawHairspring(g, p.r, 1.4)), glow);
         }
       }
     }

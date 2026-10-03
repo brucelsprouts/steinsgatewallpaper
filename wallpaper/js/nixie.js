@@ -1,5 +1,5 @@
 'use strict';
-// Nixie divergence meter.
+// Nixie divergence meter: the glowing digits, shown on their own or in their tubes.
 // Every static layer is rendered once into a sprite at device resolution; a frame
 // only composites cached sprites with per-tube alpha, so the meter is cheap to run.
 const Nixie = (() => {
@@ -108,12 +108,52 @@ const Nixie = (() => {
     g.restore();
   }
 
-  // `spread` scales how far each lit cathode's bloom reaches.
-  function buildTube(G, th, S, spread = 1) {
-    const { w, h, Hd, inner } = G;
+  // `spread` scales how far each lit cathode's bloom reaches; without `tubes`, the glass
+  // is left out and the mesh fades out softly at its edges.
+  function buildTube(G, th, S, spread = 1, tubes = true) {
+    const { w, h, Hd } = G;
     const pad = 4;
     const sp = {};
+    if (tubes) buildGlass(G, th, S, sp, pad);
 
+    // Unlit cathode stack; each layer a hair smaller and dimmer.
+    sp.stack = sprite(w, h, pad, S, g => {
+      for (let k = STACK.length - 1; k >= 0; k--) {
+        const s = 1 - k * 0.012;
+        const ox = G.dx + Hd * DW * (1 - s) / 2, oy = G.dy + Hd * (1 - s) / 2;
+        strokeDigit(g, STACK[k], ox, oy, Hd * s, Math.max(0.8, Hd * 0.022), `rgba(${th.metal},${0.15 - k * 0.007})`);
+      }
+    });
+    buildMesh(G, th, S, sp, pad, !tubes);
+
+    // Lit cathodes: a crisp core sprite and a separate low-res bloom sprite per glyph.
+    sp.lit = {};
+    sp.bloom = {};
+    for (const ch of GLYPHS) {
+      const drawGlyph = g => {
+        strokeDigit(g, ch, G.dx, G.dy, Hd, Hd * 0.06, th.hot);
+        strokeDigit(g, ch, G.dx, G.dy, Hd, Hd * 0.024, th.core);
+      };
+      const lp = Hd * 0.2;
+      const base = sprite(w, h, lp, S, drawGlyph);
+      const lit = canvas(base.c.width, base.c.height);
+      blurInto(lit, base.c, 0, 1);
+      blurInto(lit, base.c, Hd * 0.045 * S, 0.85);
+      sp.lit[ch] = { c: lit, ox: -lp, oy: -lp, res: 1 };
+
+      const bp = Hd * 1.8 * Math.max(1, spread), br = 0.5;
+      const bbase = sprite(w, h, bp, S, drawGlyph, br);
+      const bloom = canvas(bbase.c.width, bbase.c.height);
+      blurInto(bloom, bbase.c, Hd * 0.16 * S * br * spread, 0.7);
+      blurInto(bloom, bbase.c, Hd * 0.55 * S * br * spread, 0.55);
+      sp.bloom[ch] = { c: bloom, ox: -bp, oy: -bp, res: br };
+    }
+    return sp;
+  }
+
+  // The tube around the digits: glass, rods, spacers and the warm interior.
+  function buildGlass(G, th, S, sp, pad) {
+    const { w, h, Hd } = G;
     sp.back = sprite(w, h, pad, S, g => {
       const gb = g.createLinearGradient(0, 0, w, 0);
       gb.addColorStop(0, 'rgba(255,236,214,0.045)');
@@ -138,12 +178,6 @@ const Nixie = (() => {
       g.fillStyle = 'rgba(210,198,178,0.05)';
       g.fillRect(w * 0.05, G.micaTop, w * 0.9, h * 0.012);
       g.fillRect(w * 0.05, G.micaBot, w * 0.9, h * 0.012);
-      // Unlit cathode stack; each layer a hair smaller and dimmer.
-      for (let k = STACK.length - 1; k >= 0; k--) {
-        const s = 1 - k * 0.012;
-        const ox = G.dx + Hd * DW * (1 - s) / 2, oy = G.dy + Hd * (1 - s) / 2;
-        strokeDigit(g, STACK[k], ox, oy, Hd * s, Math.max(0.8, Hd * 0.022), `rgba(${th.metal},${0.15 - k * 0.007})`);
-      }
     });
 
     // Warm light filling the interior; scaled by brightness.
@@ -156,29 +190,6 @@ const Nixie = (() => {
       g.fillStyle = rg;
       g.fillRect(0, 0, w, h);
     }, 0.5);
-
-    const meshClip = new Path2D();
-    meshClip.roundRect(inner.x, inner.y, inner.w, inner.h, w * 0.04);
-    const mesh = hexMesh(inner.x, inner.y, inner.w, inner.h, w * 0.05);
-    sp.meshDark = sprite(w, h, pad, S, g => {
-      g.clip(meshClip);
-      g.lineWidth = Math.max(0.8, w * 0.012);
-      g.strokeStyle = 'rgba(0,0,0,0.36)';
-      g.stroke(mesh);
-      g.lineWidth = Math.max(0.5, w * 0.007);
-      g.strokeStyle = `rgba(${th.metal},0.07)`;
-      g.stroke(mesh);
-    });
-    sp.meshLit = sprite(w, h, pad, S, g => {
-      g.clip(meshClip);
-      const cx = w / 2, cy = G.dy + Hd / 2;
-      const rg = g.createRadialGradient(cx, cy, 0, cx, cy, Hd * 0.75);
-      rg.addColorStop(0, `rgba(${th.glow},0.26)`);
-      rg.addColorStop(1, `rgba(${th.glow},0)`);
-      g.lineWidth = Math.max(0.5, w * 0.007);
-      g.strokeStyle = rg;
-      g.stroke(mesh);
-    });
 
     sp.front = sprite(w, h, pad, S, g => {
       g.save();
@@ -215,30 +226,52 @@ const Nixie = (() => {
       g.strokeStyle = `rgba(${th.glow},0.10)`;
       g.stroke(G.env);
     });
+  }
 
-    // Lit cathodes: a crisp core sprite and a separate low-res bloom sprite per glyph.
-    sp.lit = {};
-    sp.bloom = {};
-    for (const ch of GLYPHS) {
-      const drawGlyph = g => {
-        strokeDigit(g, ch, G.dx, G.dy, Hd, Hd * 0.06, th.hot);
-        strokeDigit(g, ch, G.dx, G.dy, Hd, Hd * 0.024, th.core);
-      };
-      const lp = Hd * 0.2;
-      const base = sprite(w, h, lp, S, drawGlyph);
-      const lit = canvas(base.c.width, base.c.height);
-      blurInto(lit, base.c, 0, 1);
-      blurInto(lit, base.c, Hd * 0.045 * S, 0.85);
-      sp.lit[ch] = { c: lit, ox: -lp, oy: -lp, res: 1 };
-
-      const bp = Hd * 1.8 * Math.max(1, spread), br = 0.5;
-      const bbase = sprite(w, h, bp, S, drawGlyph, br);
-      const bloom = canvas(bbase.c.width, bbase.c.height);
-      blurInto(bloom, bbase.c, Hd * 0.16 * S * br * spread, 0.7);
-      blurInto(bloom, bbase.c, Hd * 0.55 * S * br * spread, 0.55);
-      sp.bloom[ch] = { c: bloom, ox: -bp, oy: -bp, res: br };
-    }
-    return sp;
+  // The honeycomb anode in front of the digits: dark where it shades them, faintly lit by
+  // them. `soft` fades it out toward its edges, for digits shown without their tubes.
+  function buildMesh(G, th, S, sp, pad, soft) {
+    const { w, h, Hd, inner } = G;
+    const meshClip = new Path2D();
+    meshClip.roundRect(inner.x, inner.y, inner.w, inner.h, w * 0.04);
+    const mesh = hexMesh(inner.x, inner.y, inner.w, inner.h, w * 0.05);
+    const fade = g => {
+      if (!soft) return;
+      g.globalCompositeOperation = 'destination-in';
+      g.translate(w / 2, inner.y + inner.h / 2);
+      g.scale(1, inner.h / inner.w);
+      const r = inner.w / 2, rg = g.createRadialGradient(0, 0, 0, 0, 0, r);
+      rg.addColorStop(0, 'rgba(0,0,0,1)');
+      rg.addColorStop(0.55, 'rgba(0,0,0,0.85)');
+      rg.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = rg;
+      g.fillRect(-r * 2, -r * 2, r * 4, r * 4);
+    };
+    sp.meshDark = sprite(w, h, pad, S, g => {
+      g.save();
+      g.clip(meshClip);
+      g.lineWidth = Math.max(0.8, w * 0.012);
+      g.strokeStyle = 'rgba(0,0,0,0.36)';
+      g.stroke(mesh);
+      g.lineWidth = Math.max(0.5, w * 0.007);
+      g.strokeStyle = `rgba(${th.metal},${soft ? 0.12 : 0.07})`;
+      g.stroke(mesh);
+      g.restore();
+      fade(g);
+    });
+    sp.meshLit = sprite(w, h, pad, S, g => {
+      g.save();
+      g.clip(meshClip);
+      const cx = w / 2, cy = G.dy + Hd / 2;
+      const rg = g.createRadialGradient(cx, cy, 0, cx, cy, Hd * 0.75);
+      rg.addColorStop(0, `rgba(${th.glow},0.26)`);
+      rg.addColorStop(1, `rgba(${th.glow},0)`);
+      g.lineWidth = Math.max(0.5, w * 0.007);
+      g.strokeStyle = rg;
+      g.stroke(mesh);
+      g.restore();
+      fade(g);
+    });
   }
 
   // The streak's light: a hair-thin line, white-hot at the middle, in a soft band of
@@ -377,6 +410,9 @@ const Nixie = (() => {
       this.tubeH = o.tubeH ?? 240;
       this.aspect = o.aspect ?? 0.41;
       this.plinth = o.plinth ?? true;
+      // Without tubes it is just the numbers, their unlit cathodes and honeycomb: no
+      // glass, sockets or base.
+      this.tubes = o.tubes ?? true;
       this.cx = o.cx; this.cy = o.cy;
       this.master = 1;
       this.glow = 1; // strength of the bloom, the haze and the streak (1 as designed)
@@ -398,8 +434,8 @@ const Nixie = (() => {
 
     build(S, themeName, spread = 1) {
       const th = THEMES[themeName] || THEMES.warm;
-      this.sp = buildTube(this.G, th, S, spread);
-      this.fr = buildFrame(this.L, th, S, { plinth: this.plinth });
+      this.sp = buildTube(this.G, th, S, spread, this.tubes);
+      this.fr = buildFrame(this.L, th, S, { plinth: this.plinth && this.tubes });
     }
 
     // Begin a worldline shift: every tube scrambles, then settles left to right.
@@ -480,23 +516,24 @@ const Nixie = (() => {
       const avg = B.reduce((a, b) => a + b, 0) / B.length;
 
       ctx.save();
+      if (!this.tubes) {
+        this.drawBare(ctx, view, t, B, avg, put, add);
+        ctx.restore();
+        return;
+      }
       put(fr.under, x0, y0);
       put(fr.plinth, x0, y0);
       ctx.globalCompositeOperation = 'lighter';
       add(fr.plinthLit, x0, y0, avg);
       ctx.globalCompositeOperation = 'source-over';
 
-      for (let i = 0; i < xs.length; i++) put(sp.back, x0 + xs[i], y0);
+      for (let i = 0; i < xs.length; i++) { put(sp.back, x0 + xs[i], y0); put(sp.stack, x0 + xs[i], y0); }
       ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < xs.length; i++) add(sp.interior, x0 + xs[i], y0, B[i]);
 
       // Lit cathodes, with a short afterglow on the one that just switched off.
       const lit = [];
-      for (let i = 0; i < xs.length; i++) {
-        const sl = this.slots[i], dt = t - sl.at;
-        const aCur = clamp(dt / 0.035), aPrev = 1 - clamp(dt / 0.09);
-        lit.push([sl.cur, aCur * B[i]], [sl.prev, aPrev * B[i]]);
-      }
+      for (let i = 0; i < xs.length; i++) lit.push(...this.litAt(i, t, B[i]));
       for (let i = 0; i < xs.length; i++) {
         for (const [ch, a] of lit.slice(i * 2, i * 2 + 2)) if (sp.lit[ch]) add(sp.lit[ch], x0 + xs[i], y0, a);
       }
@@ -521,6 +558,36 @@ const Nixie = (() => {
       ctx.globalAlpha = Math.min(1, STREAK * avg * avg * this.glow);
       ctx.drawImage(st.c, ox + (x0 + st.cx - sw / 2) * S, oy + (y0 + st.cy - st.h / 2) * S, sw * S, st.h * S);
       ctx.restore();
+    }
+
+    // The glyphs lit in tube i and how brightly: the current one, and a short afterglow
+    // on the one that just switched off.
+    litAt(i, t, b) {
+      const sl = this.slots[i], dt = t - sl.at;
+      return [[sl.cur, clamp(dt / 0.035) * b], [sl.prev, (1 - clamp(dt / 0.09)) * b]];
+    }
+
+    // Just the numbers, as if the tubes were there but not their glass: the faint unlit
+    // cathodes behind each digit, the lit digit, the honeycomb in front of it and its
+    // bloom, the haze around them and the streak through them.
+    drawBare(ctx, view, t, B, avg, put, add) {
+      const { S, ox, oy } = view, { x0, y0, sp, fr } = this, xs = this.L.xs, h = this.L.h;
+      const lit = xs.map((_, i) => this.litAt(i, t, B[i]).filter(([ch]) => sp.lit[ch]));
+      for (const x of xs) put(sp.stack, x0 + x, y0);
+      ctx.globalCompositeOperation = 'lighter';
+      xs.forEach((x, i) => { for (const [ch, a] of lit[i]) add(sp.lit[ch], x0 + x, y0, a); });
+      ctx.globalCompositeOperation = 'source-over';
+      for (const x of xs) put(sp.meshDark, x0 + x, y0);
+      ctx.globalCompositeOperation = 'lighter';
+      xs.forEach((x, i) => {
+        add(sp.meshLit, x0 + x, y0, B[i]);
+        for (const [ch, a] of lit[i]) add(sp.bloom[ch], x0 + x, y0, a * this.glow);
+      });
+      // The haze is centred on the tubes; the digits sit lower in them.
+      add(fr.haze, x0, y0 + h * 0.22, avg * this.glow);
+      const st = fr.streak, sw = st.w * (1 + 0.04 * Math.sin(t / 2.7));
+      ctx.globalAlpha = Math.min(1, STREAK * avg * avg * this.glow);
+      ctx.drawImage(st.c, ox + (x0 + st.cx - sw / 2) * S, oy + (y0 + st.cy - st.h / 2) * S, sw * S, st.h * S);
     }
   }
 

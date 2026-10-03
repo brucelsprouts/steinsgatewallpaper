@@ -1,10 +1,11 @@
 # Divergence Meter
 
-An animated desktop wallpaper: Makise Kurisu, or a row of nixie tubes on a walnut base,
-surrounded by slowly turning clocks, gears and an escapement, with living ink, light
-that pans across the scene, wandering dust, faint smoke and film grain over the top.
+An animated desktop wallpaper: Makise Kurisu, or the glowing digits of a nixie meter
+(with their faint unlit cathodes and honeycomb, but no glass), surrounded by slowly
+turning clocks, gears and an escapement, with living ink, light that pans across the
+scene, wandering dust, faint smoke and film grain over the top.
 The nixie meter shows the time, the date or a worldline. Every so often the worldline
-shifts: the tubes scramble (or the picture glitches), the clocks spin, and everything
+shifts: the digits scramble (or the picture glitches), the clocks spin, and everything
 settles.
 
 Everything is drawn in code (HTML canvas, no build step), apart from the Makise
@@ -47,9 +48,12 @@ in Lively's settings.
 
 | Setting | Options | Default |
 | --- | --- | --- |
-| Centrepiece | Makise Kurisu (a picture), Nixie meter | Makise Kurisu |
-| Display (nixie meter) | Time (`HH.MM.SS`, 24-hour), Date (`YY.MM.DD`), Worldline | Time |
-| Glow colour | Orange, White | Orange |
+| Centrepiece | Makise Kurisu (a picture), Nixie meter: time (`HH.MM.SS`, 24-hour), date (`YY.MM.DD`) or worldline | Makise Kurisu |
+| Glow strength, Glow size | 0–100: the centrepiece's glow (Makise's backlight, or the digits' bloom) and how far it spreads | 50 |
+| Ink strength | 0–100 | 50 |
+| Texture strength | 0–100: the mottled backdrop, the halftone patches and the worn print over everything | 50 |
+| Makise motion | On, Off | On |
+| Cursor parallax | On, Off | On |
 | Worldline shifts | On, Off | On |
 
 ## Using your own picture
@@ -148,15 +152,15 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
 
 ## How it behaves
 
-- **Worldline shifts** happen at random every 20–60 minutes. The tubes scramble and
+- **Worldline shifts** happen at random every 20–60 minutes. The digits scramble and
   settle with a glow flare while the clocks spin fast (mostly backwards) and settle.
   With the Makise centrepiece, the picture tears into glitching slices for a moment
   instead.
-  - In **Time** or **Date** mode the tubes show a canon worldline
+  - In **Time** or **Date** mode the digits show a canon worldline
     (0.571024, 0.337187, 1.130205 or 1.048596) for about 10 seconds, then roll back.
   - In **Worldline** mode they land on a new worldline and stay there.
 - **Clicking** the desktop:
-  - in Time or Date mode, spins the clocks and flashes the tubes (or makes the picture
+  - in Time or Date mode, spins the clocks and flashes the digits (or makes the picture
     flicker); the time or date stays put;
   - in Worldline mode, triggers a full shift.
 - **Moving the mouse** gives parallax: the deep clockwork drifts with the cursor while the
@@ -167,29 +171,41 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
   touch more than the rest with the cursor.
 - With **Worldline shifts** off, nothing shifts and clicks do nothing.
 - **Ink** forms on its own every few seconds, a dozen or so at a time: an ink blot
-  spreading from the drops that start it, a patch of grungy texture, a splash with its
-  drops, or a dry-brush stroke. None of it sits still: each drifts away from the
-  centrepiece, meandering, turning and growing as it goes; blots and grit keep
-  spreading all their lives while their outlines creep out and back, and the pigment
-  inside keeps flowing. After a minute or so each one thins and dissolves while others
-  form. A worldline shift throws a fresh splash and a burst of leaked light.
+  spreading from the drops that start it, a patch of grungy texture, or a splash with
+  its drops. None of it sits still: each drifts away from the centrepiece, meandering,
+  turning and growing as it goes; blots and grit keep spreading all their lives while
+  their outlines creep out and back, and the pigment inside keeps flowing. No two carry
+  the same amount of pigment (a faint veil to a dense pool), each lies thicker on one
+  side than the other, and each meets the scene its own way, from a stain that shows
+  mostly on the lit clockwork to luminous paint over the dark. After a minute or so each
+  one thins and dissolves while others form. A worldline shift throws a fresh splash and
+  a burst of leaked light.
 - **Light** falls in shafts from a source beyond the frame that travels slowly over the
   top of the scene, from the right side to beyond the upper left corner and back (about
   twelve minutes there and back), so the shafts and the pool of light on the clockwork
-  pan across it. Film light leaks slide along all four edges.
+  pan across it. Film light leaks slide along all four edges: even bands of light from
+  just beyond the frame, brightest right at the edge and fading inward, with no hot spot.
 - **Dust** wanders slowly every way through the air, glinting in the light shafts, and
   specks on the lens meander about; the film grain is new every frame.
-- A signal runs along the worldline diagram now and then.
+- **Texture**, as in the game's key art, kept quiet so it stays in the background: the
+  dark behind everything is mottled like a sprayed wall, broad soft clouds and darker
+  ragged spots that slowly change shape (easing off a little around the centrepiece); a
+  screentone of pale dots fills the pool of dark around the centrepiece, fading out from
+  its middle and down the empty left edge, and a finer halftone shades Makise's coat,
+  both moving with her; and over everything lies the texture of a worn print: broad,
+  faint wear and a few fine scratches.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
 
-- Every static part (tube glass, mesh, glow, gears, dials, textures) is rendered once into
+- Every static part (digits, cathodes, honeycomb, glow, gears, dials, textures) is rendered once into
   an image when the wallpaper starts. Each frame only moves and blends those images.
 - Each new element of ink is painted once, a few small steps per frame, then only masked
   (every fourth frame once it has formed); the whole frame takes a few milliseconds at
   2560×1440.
-- The bloom works on an eighth-size copy of the frame and the grain on a half-size one.
+- The bloom and the mottled backdrop work at an eighth of the size of the frame and the
+  grain at half; the halftone patches and the worn print are baked once and only laid
+  over.
 - Makise's rig is one small WebGL draw a frame (every effect in one pass), at the size
   she is shown.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
@@ -209,10 +225,10 @@ Then open <http://localhost:5173/>. The preview shows the live wallpaper scaled 
 window, rendered at your screen's resolution or another one (1080p, 1440p, 4K, ultrawide,
 16:10), with:
 
-- the settings (centrepiece, glow strength and size, ink strength, motion, parallax, shifts), applied the way Wallpaper Engine
+- the settings (centrepiece, glow strength and size, ink and texture strength, motion, parallax, shifts), applied the way Wallpaper Engine
   applies them;
 - buttons to shift the worldline, click, pause, or form a given kind of ink right now
-  (keys S, C, P and 1–4);
+  (keys S, C, P and 1–3);
 - time at 1×, 5× or 25×, to watch ink form, rest and dissolve;
 - how the ink is laid on (Screen or Overlay) and how strongly, for comparing;
 - restart, new ink, full screen (F), hiding the controls (H) and saving the frame as a PNG.
@@ -223,13 +239,13 @@ The wallpaper on its own is at <http://localhost:5173/wallpaper/>. In the browse
 there, `SG.shift()` triggers a shift, `SG.click()` simulates a click, `SG.ink()` throws
 fresh ink (`SG.ink('blot')` a given kind), `SG.speed(5)` runs time faster,
 `SG.paint({ blend: 'overlay', gain: 1 })` changes how the ink is laid on and `SG.state()`
-shows what the tubes and ink are doing.
+shows what the meter and ink are doing.
 
 URL parameters:
 
 - Settings: `centre=makise|time|date|worldline`, `glow=0-100` and `glowSize=0-100` (the
-  centrepiece's glow), `ink=0-100`, `motion=0|1`, `parallax=0|1`, `shift=0|1` (the sliders are
-  50 as designed)
+  centrepiece's glow), `ink=0-100`, `texture=0-100`, `motion=0|1`, `parallax=0|1`, `shift=0|1`
+  (the sliders are 50 as designed)
 - Debug only:
   - `now=2026-10-02T10:59:55` fakes the clock
   - `still=8` renders one frame 8 s after start
@@ -262,15 +278,15 @@ Code layout (`wallpaper/js`):
 | --- | --- |
 | `kit.js` | Noise, easing, canvas helpers |
 | `config.js` | Settings from the URL, Lively and Wallpaper Engine |
-| `nixie.js` | The tubes: glyphs, glass, mesh, glow, walnut base, streak, scramble and flash |
+| `nixie.js` | The meter: glowing digits, unlit cathodes, honeycomb, bloom, haze, streak, scramble and flash (and the glass tubes and walnut base it can be shown in) |
 | `portrait.js` | The Makise centrepiece: loading the picture and its rig, grading, feathering, backlight, float, glitch |
 | `rig.js` | Brings a rigged picture to life in WebGL: effects painted onto the one picture (sway, swing, waves, breathing, parallax, hold), their springs and the breeze |
 | `mech.js` | Dials, hands, gears, escapement; 3D tilt; stepped motion |
-| `paint.js` | Drafting marks, the worldline diagram and its signal, shape helpers |
+| `paint.js` | Drafting marks, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |
-| `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, bloom, lens dust, grain |
+| `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, the mottled backdrop, halftone patches and worn print, bloom, lens dust, grain |
 | `scene.js` | Composition, depth, parallax |
-| `display.js` | What the tubes show and when the worldline shifts |
+| `display.js` | What the meter shows and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |
 
 `mockups/` holds the four static compositions from the design phase.

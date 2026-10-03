@@ -7,8 +7,10 @@
 // moves opposite the deep clockwork; foreground silhouettes move the most.
 const Scene = (() => {
   const A = Mech.Assembly, O = Paint.Overlay;
-  // Well clear of the astrolabe on its right, even with the cursor pulling them together.
-  const METER = { cx: 560, cy: 610, tubeH: 210, depth: 0.3 };
+  // Well clear of the astrolabe on its right, even with the cursor pulling them together,
+  // and low enough that the numbers sit level with the middle of the frame. The numbers
+  // without their glass tubes.
+  const METER = { cx: 560, cy: 695, tubeH: 210, depth: 0.3, tubes: false };
   // What the scene darkens around the meter, so it keeps a pool of negative space.
   const FOCUS = { x: METER.cx, y: METER.cy, rx: 760, ry: 440 };
   const P = 42; // parallax travel in design px per unit of depth
@@ -17,20 +19,15 @@ const Scene = (() => {
     return [
       // ---- Deep clockwork ----
       // A half clock hanging from the top, its lowest numerals beside the centrepiece's
-      // head rather than behind it.
+      // head rather than behind it, and a degree scale inside it that steps the other way.
       new A({ x: 380, y: -300, depth: -0.8, blur: 1.4, res: 0.8, alpha: 0.2, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
-        parts: [{ type: 'dial', r: 780, hands: false, track: false, turn: -1 }] }),
-      new O({ kind: 'worldlines', x: 810, y: 130, width: 1400, height: 170, fade: 0.28, behind: { x: 2000, y: 560, r: 800, soft: 50 }, pinches: [0.33, 0.52, 0.7], depth: -0.7, alpha: 0.28, glow: 0.8, breathe: 0.1,
-        pulse: true, seed: 21, op: 'screen' }),
+        parts: [
+          { type: 'dial', r: 780, hands: false, track: false, turn: -1 },
+          { type: 'dial', r: 560, face: 'scale', hands: false, track: false, turn: 1 },
+        ] }),
       // The astrolabe: a giant dial whose rings step against each other.
       new A({ x: 2000, y: 560, depth: -0.6, blur: 1.6, res: 0.8, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
         parts: [{ type: 'dial', r: 820, ring24: true }] }),
-      // Tucked under the half clock's rim.
-      new A({ x: 150, y: 420, depth: -0.55, blur: 1.2, res: 0.85, alpha: 0.2, rx: 0.12, ry: 0.15, seed: 9,
-        parts: [
-          { type: 'gear', pitch: 18, teeth: 30, spokes: 4, curved: true },
-          { type: 'gear', teeth: 16, spokes: 0, holes: 5, mesh: { to: 0, angle: 0.6 } },
-        ] }),
       new A({ x: 2330, y: 1330, depth: -0.45, blur: 1.2, res: 0.85, alpha: 0.1, rx: 0.15, ry: 0.2, seed: 2,
         beat: { period: 3, dur: 1.2, teeth: 0.25 },
         parts: [{ type: 'gear', pitch: 44, teeth: 48, spokes: 6, curved: true }] }),
@@ -45,13 +42,6 @@ const Scene = (() => {
       // Akihabara time (UTC+9), upper right.
       new A({ x: 2300, y: 230, depth: 0, blur: 0.5, alpha: 0.14, rx: 0.16, ry: 0.22, roll: -0.15, seed: 5,
         parts: [{ type: 'dial', r: 270, tz: 9 }] }),
-      // Down the left edge, clear of the centrepiece.
-      new A({ x: 130, y: 930, depth: 0.1, blur: 0.4, alpha: 0.18, rx: 0.08, ry: 0.14, seed: 10,
-        parts: [
-          { type: 'gear', pitch: 26, teeth: 34, spokes: 6, curved: true },
-          { type: 'gear', teeth: 18, spokes: 4, mesh: { to: 0, angle: -0.7 } },
-          { type: 'gear', teeth: 12, spokes: 0, mesh: { to: 1, angle: -2.1 } },
-        ] }),
       // Small clock with its escapement, beating with the real seconds.
       new A({ x: 2110, y: 860, depth: 0.2, alpha: 0.19, rx: 0.08, ry: -0.12, seed: 6,
         beat: { period: 1, dur: 0.35, teeth: 0.25 },

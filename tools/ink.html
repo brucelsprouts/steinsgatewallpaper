@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- Ink lab (needs tools/serve.js): elements of living ink in isolation, for tuning.
      mode=sheet (six at rest) | form (one forming) | fade (one dissolving) | one (actual size)
-     kind=blot|grit|splash|stroke (default: a mix)  seed=1  S=0.42 (scale)  gain=1 (opacity) -->
+     kind=blot|grit|splash (default: a mix)  seed=1  S=0.42 (scale)  gain=1 (opacity) -->
 <html><head><meta charset="utf-8"><title>ink lab</title>
 <style>html, body { margin: 0; background: #040303; } canvas { display: block; }</style></head>
 <body><canvas id="c" width="2560" height="1440"></canvas>
@@ -11,7 +11,7 @@
 <script>
 const q = new URLSearchParams(location.search);
 const mode = q.get('mode') || 'sheet', seed = Number(q.get('seed') || 1), gain = Number(q.get('gain') || 1);
-const kinds = q.get('kind') ? [q.get('kind')] : ['blot', 'grit', 'splash', 'blot', 'stroke', 'grit'];
+const kinds = q.get('kind') ? [q.get('kind')] : ['blot', 'grit', 'splash', 'blot', 'splash', 'grit'];
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 ctx.fillStyle = '#040303';
 ctx.fillRect(0, 0, cv.width, cv.height);
