@@ -48,21 +48,29 @@
         "max": 100,
         "value": 50
       },
-      "motion": {
+      "schematic": {
         "order": 104,
+        "text": "Schematic strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "motion": {
+        "order": 105,
         "text": "Makise motion",
         "type": "bool",
         "value": true,
         "condition": "centre.value == 'makise'"
       },
       "parallax": {
-        "order": 105,
+        "order": 106,
         "text": "Cursor parallax",
         "type": "bool",
         "value": true
       },
       "shift": {
-        "order": 106,
+        "order": 107,
         "text": "Worldline shifts",
         "type": "bool",
         "value": true

@@ -48,8 +48,9 @@ dark. Anything brighter (the clockwork, ink highlights, Makise, the digits) is u
   of drawing stays about the same.
 - **Parallax:** it's the deepest layer and drifts with the cursor, like the backdrop.
 - **Strength:** a new slider, **Schematic strength** (0–100, 50 by default; 0 turns it
-  off). At 50 the paper sits at about 14–18/255 over the black (tuned by eye): plainly
-  there, but below the clockwork.
+  off). At 50 the paper sits at about 17–23/255 in the open middle of the frame, less
+  toward the edges under the vignette (tuned by eye): plainly there, but below the
+  clockwork.
 - **Performance:** the sheets are baked once, at about half the frame's resolution, and
   only again when the screen size changes. Each frame is one fill for the paper and one
   pattern fill per sheet. Target: under 1 ms more per frame at 1440p.

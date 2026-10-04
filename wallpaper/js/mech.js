@@ -524,5 +524,5 @@ const Mech = (() => {
     }
   }
 
-  return { Assembly, PALETTES, Mat, gearDims };
+  return { Assembly, PALETTES, Mat, gearDims, gearPath };
 })();

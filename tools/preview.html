@@ -85,6 +85,10 @@
     <span class="label">Texture</span>
     <input data-key="texture" type="range" min="0" max="100" step="5" aria-label="Texture strength"><output></output>
   </div>
+  <div class="group" title="How strong the schematics behind everything are: dim drafting sheets that slowly change. 0 turns them off, 50 as designed">
+    <span class="label">Schematic</span>
+    <input data-key="schematic" type="range" min="0" max="100" step="5" aria-label="Schematic strength"><output></output>
+  </div>
   <div class="group">
     <span class="label">Motion</span>
     <div class="seg" data-key="motion"><button data-v="true">On</button><button data-v="false">Off</button></div>
@@ -141,13 +145,14 @@ const dpr = window.devicePixelRatio || 1;
 // link) comes back to the same view. Paint left unset follows the wallpaper's default.
 const q = new URLSearchParams(location.search);
 const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
-const SETTINGS = ['centre', 'glow', 'glowSize', 'ink', 'texture', 'motion', 'parallax', 'shift'];
+const SETTINGS = ['centre', 'glow', 'glowSize', 'ink', 'texture', 'schematic', 'motion', 'parallax', 'shift'];
 const st = {
   centre: ['makise', 'time', 'date', 'worldline'].includes(q.get('centre')) ? q.get('centre') : 'makise',
   glow: num('glow', 50),
   glowSize: num('glowSize', 50),
   ink: num('ink', 50),
   texture: num('texture', 50),
+  schematic: num('schematic', 50),
   motion: q.get('motion') !== 'false',
   parallax: q.get('parallax') !== 'false',
   shift: q.get('shift') !== 'false',

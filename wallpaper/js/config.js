@@ -7,12 +7,14 @@
 //   ink:       0-100, how strong the ink is (50 as designed)
 //   texture:   0-100, how strong the printed texture is: the mottled backdrop, the
 //              halftone patches and the worn print over everything (50 as designed)
+//   schematic: 0-100, how strong the schematics behind everything are: dim drafting
+//              sheets that slowly change (50 as designed, 0 turns them off)
 //   motion:    Makise's hair, arms and breath moving, and her float
 //   parallax:  the scene drifting with the cursor
 //   shift:     worldline shifts on/off (random every 20-60 min, and on click)
 // `display` (what the meter shows) is read from `centre`: time while it's Makise.
 const Config = (() => {
-  const defaults = { centre: 'makise', glow: 50, glowSize: 50, ink: 50, texture: 50, motion: true, parallax: true, shift: true };
+  const defaults = { centre: 'makise', glow: 50, glowSize: 50, ink: 50, texture: 50, schematic: 50, motion: true, parallax: true, shift: true };
   // Lively dropdowns report an index; map them back to our values.
   const choices = { centre: ['makise', 'time', 'date', 'worldline'] };
   // Older links and saved settings: `centre=nixie` was the meter, `display` what it showed.

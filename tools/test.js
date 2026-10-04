@@ -578,5 +578,59 @@ test('rig: at its strongest nothing folds over or tears, and the shader finds ev
   }
 });
 
+// ---------- Schematics: how the sheets fade and drift (nothing is drawn without a screen) ----------
+
+function loadSchematic() {
+  const ctx = { Math };
+  vm.createContext(ctx);
+  const src = ['kit.js', 'schematic.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
+  vm.runInContext(src + ';this.Schematic = Schematic;', ctx);
+  return ctx;
+}
+
+test('schematic: the sheets take turns, each a while fully in, always about as much drawing', () => {
+  const { Schematic } = loadSchematic();
+  const N = 600, full = [0, 0, 0], out = [0, 0, 0];
+  for (let k = 0; k < N; k++) {
+    const t = k / N * Schematic.FADE, f = Schematic.fades(t), sum = f.reduce((a, b) => a + b, 0);
+    assert.strictEqual(f.length, 3);
+    assert.ok(sum >= 1.2 && sum <= 1.8, `${sum.toFixed(2)} sheets showing at ${t.toFixed(1)}s`);
+    f.forEach((v, i) => {
+      assert.ok(v >= 0 && v <= 1, `sheet ${i} at ${v}`);
+      if (v === 1) full[i]++;
+      if (v === 0) out[i]++;
+    });
+  }
+  // Each sheet is fully in, and fully out, for at least a fifth of its cycle.
+  for (let i = 0; i < 3; i++) assert.ok(full[i] > N / 5 && out[i] > N / 5, `sheet ${i} fully in ${full[i]}/${N}, out ${out[i]}/${N}`);
+});
+
+test('schematic: the sheets drift slowly and smoothly, however long it runs', () => {
+  const { Schematic } = loadSchematic();
+  const { w, h } = Schematic.SHEET, cam = { x: 0, y: 0 };
+  const apart = (a, b, n) => Math.abs((b - a) - n * Math.round((b - a) / n));
+  for (let i = 0; i < 3; i++) {
+    for (const t0 of [0, 3600, 86400 * 30]) {
+      const a = Schematic.place(i, t0, cam), b = Schematic.place(i, t0 + 1, cam);
+      for (const p of [a, b]) assert.ok(p.x >= 0 && p.x < w && p.y >= 0 && p.y < h, `sheet ${i} at ${p.x},${p.y}`);
+      const moved = Math.hypot(apart(a.x, b.x, w), apart(a.y, b.y, h));
+      assert.ok(moved < 8, `sheet ${i} moved ${moved.toFixed(1)} px in a second at ${t0}s`);
+      assert.ok(Math.abs(b.zoom - a.zoom) < 0.01 && Math.abs(b.turn - a.turn) < 0.01, `sheet ${i} jumped at ${t0}s`);
+    }
+  }
+});
+
+test('schematic: the sheets drift with the cursor, as the deepest layer', () => {
+  const { Schematic } = loadSchematic();
+  const { w } = Schematic.SHEET;
+  for (let i = 0; i < 3; i++) {
+    const a = Schematic.place(i, 10, { x: 0, y: 0 }), b = Schematic.place(i, 10, { x: 1, y: 0 });
+    // The point at the middle of the frame slides back along the sheet: the sheet moves
+    // the way the cursor did.
+    const d = (b.x - a.x) - w * Math.round((b.x - a.x) / w);
+    assert.ok(d < -30, `sheet ${i} moved ${d.toFixed(1)} px along itself`);
+  }
+});
+
 process.exitCode = failures ? 1 : 0;
 console.log(failures ? `${failures} failing` : 'all passing');

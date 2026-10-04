@@ -48,7 +48,11 @@
   const screen = new Atmos.Tone({ cell: 12, color: 'rgb(228,218,206)', blend: 'screen' });
   const onMakise = new Atmos.Tone({ cell: 7, color: 'rgb(60,60,60)', blend: 'soft-light', res: 1, seed: 67 });
   const texture = () => Config.get('texture') / 50;
-  backdrop.cam = scene.dust.cam;
+  // The schematics: dim drafting sheets the whole scene is drawn over. The setting (0-100,
+  // 50 as designed) scales how far their paper lifts the black.
+  const sheets = new Schematic.Sheets();
+  const schematic = () => Config.get('schematic') / 50;
+  backdrop.cam = sheets.cam = scene.dust.cam;
   smoke.cam = light.cam = scene.dust.cam; // they drift with the near air
   scene.dust.beam = (x, y, t) => light.beamAt(x, y, t); // dust glints in the light shafts
   // Clocks spin on every shift and click, and the picture flickers; a real worldline
@@ -75,6 +79,7 @@
     scene.build(view.S, view, theme(), f);
     smoke.build(view, f);
     backdrop.build(view, f);
+    sheets.build(view);
     // The screentone: around the middle of the centrepiece, and out into the empty strip
     // down the left edge.
     // The screentone and the halftone are Makise's alone.
@@ -141,6 +146,9 @@
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#040303';
     ctx.fillRect(0, 0, view.W, view.H);
+    // The schematics first: the paper everything else is drawn on.
+    const sk = schematic();
+    if (sk > 0) sheets.draw(ctx, view, t, 0.09 * sk);
     scene.drawBehind(ctx, view, t, now);
     // The backdrop and the screentone go in after the pool of dark the scene keeps around
     // the centrepiece, so they reach the whole frame and show in that pool; the backdrop

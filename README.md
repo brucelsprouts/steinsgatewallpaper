@@ -2,8 +2,9 @@
 
 An animated desktop wallpaper: Makise Kurisu, or the glowing digits of a nixie meter
 (with their faint unlit cathodes and honeycomb, but no glass), surrounded by slowly
-turning clocks, gears and an escapement, with living ink, light that pans across the
-scene, wandering dust, faint smoke and film grain over the top.
+turning clocks, gears and an escapement over dim drafting schematics that slowly
+change, with living ink, light that pans across the scene, wandering dust, faint smoke
+and film grain over the top.
 The nixie meter shows the time, the date or a worldline. Every so often the worldline
 shifts: the digits scramble (or the picture glitches), the clocks spin, and everything
 settles.
@@ -52,6 +53,7 @@ in Lively's settings.
 | Glow strength, Glow size | 0–100: the centrepiece's glow (Makise's backlight, or the digits' bloom) and how far it spreads | 50 |
 | Ink strength | 0–100 | 50 |
 | Texture strength | 0–100: the mottled backdrop, the halftone patches and the worn print over everything | 50 |
+| Schematic strength | 0–100: the dim drafting sheets behind everything (0 turns them off) | 50 |
 | Makise motion | On, Off | On |
 | Cursor parallax | On, Off | On |
 | Worldline shifts | On, Off | On |
@@ -194,6 +196,15 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
   its middle and down the empty left edge, and a finer halftone shades Makise's coat,
   both moving with her; and over everything lies the texture of a worn print: broad,
   faint wear and a few fine scratches.
+- **Schematics** lie behind everything, like the technical drawings in the opening:
+  compass circles and dials, gear trains, squares, diamonds and zig-zags, construction
+  lines, rulers and scribbled graphite, in pen on grubby paper. They go in the way you'd
+  lay a scan of a drawing into Photoshop, in Lighten at a low opacity, so the black lifts
+  to a dim warm paper and the lines stay dark; the rest of the scene is drawn over them.
+  Three sheets are double-exposed: each drifts its own way, slowly zooms and turns, and
+  fades in and out over about a minute and a half, resting fully in for a while, so one
+  drawing slowly gives way to another. The pool of dark around the centrepiece dims them
+  there.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
@@ -206,6 +217,9 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
 - The bloom and the mottled backdrop work at an eighth of the size of the frame and the
   grain at half; the halftone patches and the worn print are baked once and only laid
   over.
+- The schematics are baked once, three sheets at about half the frame's resolution
+  (again only if the screen size changes); each frame lays them over the frame with four
+  fills, under half a millisecond at 2560×1440.
 - Makise's rig is one small WebGL draw a frame (every effect in one pass), at the size
   she is shown.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
@@ -225,7 +239,7 @@ Then open <http://localhost:5173/>. The preview shows the live wallpaper scaled 
 window, rendered at your screen's resolution or another one (1080p, 1440p, 4K, ultrawide,
 16:10), with:
 
-- the settings (centrepiece, glow strength and size, ink and texture strength, motion, parallax, shifts), applied the way Wallpaper Engine
+- the settings (centrepiece, glow strength and size, ink, texture and schematic strength, motion, parallax, shifts), applied the way Wallpaper Engine
   applies them;
 - buttons to shift the worldline, click, pause, or form a given kind of ink right now
   (keys S, C, P and 1–3);
@@ -244,7 +258,8 @@ shows what the meter and ink are doing.
 URL parameters:
 
 - Settings: `centre=makise|time|date|worldline`, `glow=0-100` and `glowSize=0-100` (the
-  centrepiece's glow), `ink=0-100`, `texture=0-100`, `motion=0|1`, `parallax=0|1`, `shift=0|1`
+  centrepiece's glow), `ink=0-100`, `texture=0-100`, `schematic=0-100`, `motion=0|1`,
+  `parallax=0|1`, `shift=0|1`
   (the sliders are 50 as designed)
 - Debug only:
   - `now=2026-10-02T10:59:55` fakes the clock
@@ -285,6 +300,7 @@ Code layout (`wallpaper/js`):
 | `paint.js` | Drafting marks, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |
 | `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, the mottled backdrop, halftone patches and worn print, bloom, lens dust, grain |
+| `schematic.js` | The schematics: drafting sheets drawn in code, double-exposed and slowly changing behind everything |
 | `scene.js` | Composition, depth, parallax |
 | `display.js` | What the meter shows and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |

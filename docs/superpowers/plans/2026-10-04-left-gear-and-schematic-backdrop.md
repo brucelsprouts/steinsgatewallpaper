@@ -701,3 +701,24 @@ Expected: `1 failing` (the pre-existing rig test only).
 git add wallpaper/js/schematic.js wallpaper/js/mech.js wallpaper/js/main.js wallpaper/js/config.js wallpaper/index.html wallpaper/project.json wallpaper/LivelyProperties.json tools/preview.html tools/test.js README.md workshop/WORKSHOP.md
 git commit -m "Lay dim, slowly changing schematics behind the scene"
 ```
+
+---
+
+## As built
+
+Tuning by eye changed a few numbers from the code above:
+
+- **Gears:** the big gear sits at x −240 (not −200) and the small one meshes at angle −1.2
+  (not −1.3). At −200 its rim came within a few px of her coat at the bottom; this keeps
+  both gears on the edge and clear of her above the fade.
+- **Fades:** `clamp(0.5 + 0.75 sin …)` instead of `0.5 + 0.5 sin …`. With pure sines each
+  sheet spent most of its time half faded, which halved its lines' darkness and made them
+  unreadable. Now each sheet rests fully in (and fully out) for about a quarter of its
+  cycle, and 1.25–1.75 sheets show at any time. The test checks that instead of a
+  constant 1.5.
+- **Pen:** a `PEN` multiplier (widths ×1.7, darkness ×1.4), denser and darker scribbles
+  (400 + 2.2 R strokes, alpha 0.08–0.38), and lighter grime (0.15 broad, 0.06 fine).
+- **Strength:** the paper's opacity at 50 is 0.09 (not 0.06), so the paper sits at
+  about 17–23/255 in the open middle of the frame.
+- **Measured:** 0.38 ms a frame at 2560×1440 (0.40 at 1080p, 0.82 at 4K), plus a one-off
+  bake of 27–43 ms.

@@ -49,6 +49,7 @@ Every 20–60 minutes the worldline shifts: the picture tears into glitching sli
 [*][b]Cursor parallax:[/b] the deep clockwork drifts with your mouse while the nearer layers move against it
 [*][b]Click the desktop[/b] to spin the clocks and flash the meter (in Worldline mode, to trigger a full shift)
 [*]Living ink that blooms, drifts and dissolves; light shafts from a source that slowly crosses the scene; dust, smoke, light leaks and film grain
+[*]Dim drafting schematics behind everything, slowly drifting and changing, like the drawings in the opening
 [*]The upper-right clock keeps Akihabara time (UTC+9)
 [/list]
 
@@ -56,7 +57,7 @@ Every 20–60 minutes the worldline shifts: the picture tears into glitching sli
 [list]
 [*][b]Centrepiece:[/b] Makise Kurisu, or Nixie meter: time / date / worldline
 [*][b]Glow strength[/b] and [b]Glow size:[/b] Makise's backlight or the digits' bloom
-[*][b]Ink strength[/b] and [b]Texture strength[/b]
+[*][b]Ink strength[/b], [b]Texture strength[/b] and [b]Schematic strength[/b]
 [*][b]Makise motion[/b], [b]Cursor parallax[/b], [b]Worldline shifts:[/b] on or off
 [/list]
 
