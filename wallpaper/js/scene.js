@@ -62,9 +62,14 @@ const Scene = (() => {
       new A({ x: 2610, y: 20, depth: 0.75, blur: 0.5, alpha: 1, rx: 0.1, ry: 0.15, seed: 8, drift: 14, shine: 0,
         beat: { period: 4, dur: 1.6, teeth: 0.25 },
         parts: [{ type: 'gear', style: 'solid', pitch: 62, teeth: 26, spokes: 5 }] }),
-      new A({ x: -70, y: 1500, depth: 1.0, blur: 0.7, alpha: 1, rx: 0.1, ry: 0.12, seed: 15, drift: 16, shine: 0,
+      // Climbing the left edge beside her: a big gear, and a small one meshing with it in
+      // the empty band beside her hair.
+      new A({ x: -240, y: 1400, depth: 1.0, blur: 0.7, alpha: 1, rx: 0.1, ry: 0.12, seed: 15, drift: 16, shine: 0,
         beat: { period: 5, dur: 1.8, teeth: 0.25 },
-        parts: [{ type: 'gear', style: 'solid', pitch: 58, teeth: 34, spokes: 6, curved: true }] }),
+        parts: [
+          { type: 'gear', style: 'solid', pitch: 64, teeth: 48, spokes: 6, curved: true },
+          { type: 'gear', style: 'solid', teeth: 16, spokes: 4, curved: true, mesh: { to: 0, angle: -1.2 } },
+        ] }),
     ].sort((a, b) => a.depth - b.depth);
   }
 
