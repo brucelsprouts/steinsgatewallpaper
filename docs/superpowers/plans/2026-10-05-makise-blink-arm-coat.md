@@ -23,7 +23,7 @@ and gains the new ones. The editor learns Blink (add, preview, arrow, no hold se
 - Blink defaults: Travel 20 px, Every 5 s (1.5–30), Length 0.16 s, Doubles 0.15,
   Direction 90. Shipped blink: Travel 24.
 - Left forearm: pivot (640, 560), length 290, max 3.5 px, idle 2. Left arm: wind 2, max
-  7.5, idle 2.5. Coat hem: max 10. Coat flutter: 0.8. Tie: pivot (425, 292), length 325,
+  5.8, idle 2.5. Coat hem: max 6. Coat flutter: 0.8. Tie: pivot (425, 292), length 325,
   max 2.5, hold false.
 - `makise-rig-0.png` and `makise-rig-1.png` stay byte-identical; only `-2.png`'s blue,
   the new `-3.png` and `makise-rig.js` change.
@@ -334,7 +334,7 @@ forearm = blur(sleeve, 3) * smooth(10, 100, np.hypot(xs - ELBOW[0], ys - ELBOW[1
 
 # The coat round her legs sways: free toward the hem, still at the waist, less near her
 # body, and fading out beside her left forearm, so neither drags the other.
-hem = blur(reach(jacket, 2, 24) * smooth(600, 860, ys) * loose * (1 - reach(sleeve, 0, 28)), 5)
+hem = blur(reach(jacket, 2, 44) * smooth(560, 820, ys) * loose * (1 - reach(sleeve, 0, 28)), 8)
 
 # The tie sways from its knot, a little, easing off just above the belt.
 tie = opaque & ((hue < 12) | (hue > 340)) & (sat >= 110) & shapes([TORSO]) & (ys > 280)
@@ -343,13 +343,13 @@ tie = blur(reach(tie, 1, 6), 2) * smooth(300, 430, ys) * (1 - smooth(586, 612, y
 ```
 
   `maps = [[hold, sway, ripples], [arms[0], arms[1], flutter], [breath, head, blink], [forearm, hem, tie]]`;
-  effects: Left arm `wind 2, max 7.5, idle 2.5`; Coat flutter `amount 0.8`; then
+  effects: Left arm `wind 2, max 5.8, idle 2.5`; Coat flutter `amount 0.8`; then
 
 ```python
     {'kind': 'blink', 'name': 'Blink', 'mask': [2, 2], 'amount': TRAVEL, 'every': 5, 'span': 0.16, 'twice': 0.15, 'dir': 90},
     {'kind': 'swing', 'name': 'Left forearm', 'mask': [3, 0], 'pivot': list(ELBOW), 'length': FOREARM_LEN,
      'gain': 1.2, 'wind': 1, 'hz': 0.5, 'damp': 0.3, 'max': 3.5, 'idle': 2},
-    {'kind': 'sway', 'name': 'Coat hem', 'mask': [3, 1], 'gain': 1.8, 'wind': 3.5, 'hz': 0.42, 'damp': 0.32, 'max': 10},
+    {'kind': 'sway', 'name': 'Coat hem', 'mask': [3, 1], 'gain': 1.8, 'wind': 3.5, 'hz': 0.42, 'damp': 0.32, 'max': 6},
     {'kind': 'swing', 'name': 'Tie', 'hold': False, 'mask': [3, 2], 'pivot': list(KNOT), 'length': TIE_LEN,
      'gain': 1.2, 'wind': 1.2, 'hz': 0.7, 'damp': 0.25, 'max': 2.5},
 ```

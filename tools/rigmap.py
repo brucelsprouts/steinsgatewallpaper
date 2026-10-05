@@ -1,12 +1,12 @@
 """Make the starting rig for the Makise picture: python tools/rigmap.py
 
 Reads wallpaper/img/makise.webp and writes beside it makise-rig.js and the masks it
-names (makise-rig-0.png, -1.png, -2.png: three masks to each, red, green and blue, at
-half the picture's size). Touch the rig up afterwards in tools/rig.html; running this
+names (makise-rig-0.png to -3.png: three masks to each, red, green and blue, at half
+the picture's size). Touch the rig up afterwards in tools/rig.html; running this
 again starts it over.
 
-The masks come from the colours of the hair and the jacket inside regions placed by hand
-for this picture, so they fit it alone:
+The masks come from the colours of the hair, jacket and tie inside regions placed by hand
+for this picture, and from her lash lines measured on it, so they fit it alone:
   hold       her face and eyes, neck, shirt, tie, belt, shorts and legs, and a soft
              margin around them over whatever moves beside them (so the hair and coat
              bend there instead of dragging them along)
@@ -18,6 +18,10 @@ for this picture, so they fit it alone:
   flutter    waves through the loose cuffs and hem
   breath     everything above her chest, easing off to nothing at the waist
   head       her head, a little nearer than the rest (parallax)
+  blink      each eye's lid comes down so its upper lash lands on the lower lid
+  forearm    her left forearm (screen right) bends a little at the elbow
+  hem        the jacket round her legs sways, beside but apart from that forearm
+  tie        the tie sways a little from its knot
 Needs Pillow, NumPy and SciPy.
 """
 import json
@@ -62,6 +66,24 @@ MID = 440                            # the middle of her body
 CHEST = (290, 620)                   # rows over which the breath eases off, shoulders to waist
 NECK = (230, 330)                    # rows over which the head's parallax eases off
 MARGIN = 16                          # how far the hold reaches over what moves beside it (px)
+EYELIDS = [  # each eye, column by column: x, the bottom of its upper lash, the top of its lower lid
+    [(360, 155, 155), (362, 156, 158), (364, 154, 162), (366, 153, 167), (368, 152, 168), (370, 151, 169),
+     (372, 151, 170), (374, 150, 170), (376, 150, 171), (378, 150, 171), (380, 149, 171), (382, 150, 170),
+     (384, 150, 168), (386, 150, 168), (388, 150, 168), (390, 151, 167), (392, 152, 164), (394, 153, 163),
+     (396, 150, 154), (398, 150, 150)],
+    [(441, 133, 133), (444, 130, 147), (446, 130, 147), (448, 129, 148), (450, 128, 148), (452, 128, 147),
+     (454, 127, 147), (456, 127, 147), (458, 127, 148), (460, 130, 149), (462, 133, 147), (464, 136, 146),
+     (467, 139, 139)],
+]
+LASH = 5                             # how thick the upper lash is
+TRAVEL = 24                          # how far the lid comes down where its mask is full
+ELBOW = (640, 560)                   # her left elbow
+FOREARM = [  # her left sleeve below the elbow, its cuff and her hand: out over the air beside
+    (602, 548), (690, 548), (700, 610), (722, 700), (742, 762), (750, 792), (758, 858),  # it but
+    (674, 858), (650, 804), (650, 766), (635, 738), (628, 700), (621, 650), (611, 600)]  # short of the coat
+FOREARM_LEN = 290                    # from the elbow to her fingertips
+KNOT = (425, 292)                    # where the tie hangs from
+TIE_LEN = 325                        # from the knot to its tip
 
 im = Image.open(img / 'makise.webp').convert('RGBA')
 W, H = im.size
@@ -148,10 +170,42 @@ flutter = blur(coat * smooth(500, 860, ys) * smooth(70, 190, np.abs(xs - MID)) *
 breath = 1 - smooth(CHEST[0], CHEST[1], ys)
 head = (1 - smooth(NECK[0], NECK[1], ys)) * blur(reach(opaque, 4, 30), 8)
 
+# She blinks: in each column of each eye, the lid above comes down so the upper lash lands
+# on the lower lid. Stored as how far (over TRAVEL): nothing above the lid, rising over it
+# to the full height the eye is open there, held over the lash's resting place on the
+# lower lid, and gone within a px or two below it.
+blink = np.zeros((H, W), np.float32)
+rows = np.arange(H, dtype=np.float32)
+for eye in EYELIDS:
+    ex, lash, lid = (np.array(c, np.float32) for c in zip(*eye))
+    for x in range(int(ex[0]), int(ex[-1]) + 1):
+        b, l = np.interp(x, ex, lash), np.interp(x, ex, lid)
+        T = l - b
+        if T <= 0:
+            continue
+        top = b - LASH - max(3.0, 0.8 * T)
+        ramp = np.clip((rows - top) / (l - LASH - top), 0, 1)
+        blink[:, x] = np.maximum(blink[:, x], T / TRAVEL * np.where(rows <= l, ramp, np.clip(1 - (rows - l) / 1.5, 0, 1)))
+
+# Her left forearm bends at the elbow: its sleeve, cuff and hand, reaching out over the air
+# beside it but fading out before the coat it lies against, growing from the elbow.
+sleeve = shapes([FOREARM])
+forearm = blur(sleeve, 3) * smooth(10, 100, np.hypot(xs - ELBOW[0], ys - ELBOW[1]))
+
+# The coat round her legs sways: free toward the hem, still at the waist, less near her
+# body, and fading out beside her left forearm, so neither drags the other. Its edges are
+# wide and soft, so swinging out over the air beside it never folds the picture.
+hem = blur(reach(jacket, 2, 44) * smooth(560, 820, ys) * loose * (1 - reach(sleeve, 0, 28)), 8)
+
+# The tie sways from its knot, a little, easing off just above the belt.
+tie = opaque & ((hue < 12) | (hue > 340)) & (sat >= 110) & shapes([TORSO]) & (ys > 280)
+tie = ndimage.binary_fill_holes(close(tie, 3))
+tie = blur(reach(tie, 1, 6), 2) * smooth(300, 430, ys) * (1 - smooth(586, 612, ys))
+
 # Three masks to a PNG, at half size.
 q = ((W + 1) // 2, (H + 1) // 2)
 half = lambda m: Image.fromarray(np.uint8(np.clip(m, 0, 1) * 255 + 0.5)).resize(q, Image.BOX)
-maps = [[hold, sway, ripples], [arms[0], arms[1], flutter], [breath, head, np.zeros((H, W))]]
+maps = [[hold, sway, ripples], [arms[0], arms[1], flutter], [breath, head, blink], [forearm, hem, tie]]
 names = []
 for i, chans in enumerate(maps):
     names.append(f'makise-rig-{i}.png')
@@ -165,16 +219,22 @@ effects = [
     {'kind': 'swing', 'name': 'Right arm', 'mask': [1, 0], 'pivot': list(SHOULDERS[0]), 'length': ARM,
      'gain': 1.3, 'wind': 1.65, 'hz': 0.6, 'damp': 0.4, 'max': 5.8},
     {'kind': 'swing', 'name': 'Left arm', 'mask': [1, 1], 'pivot': list(SHOULDERS[1]), 'length': ARM,
-     'gain': 1.3, 'wind': 1.65, 'hz': 0.67, 'damp': 0.4, 'max': 5.8},
-    {'kind': 'wave', 'name': 'Coat flutter', 'mask': [1, 2], 'amount': 0.35, 'length': 270, 'speed': 56, 'dir': 62, 'gust': 3.5, 'vary': 0},
+     'gain': 1.3, 'wind': 2, 'hz': 0.67, 'damp': 0.4, 'max': 5.8, 'idle': 2.5},
+    {'kind': 'wave', 'name': 'Coat flutter', 'mask': [1, 2], 'amount': 0.8, 'length': 270, 'speed': 56, 'dir': 62, 'gust': 3.5, 'vary': 0},
     {'kind': 'breathe', 'name': 'Breath', 'mask': [2, 0], 'amount': 0.9, 'dir': 270, 'period': 4.8},
     {'kind': 'parallax', 'name': 'Head', 'mask': [2, 1], 'amount': 3},
+    {'kind': 'blink', 'name': 'Blink', 'mask': [2, 2], 'amount': TRAVEL, 'every': 5, 'span': 0.16, 'twice': 0.15, 'dir': 90},
+    {'kind': 'swing', 'name': 'Left forearm', 'mask': [3, 0], 'pivot': list(ELBOW), 'length': FOREARM_LEN,
+     'gain': 1.2, 'wind': 1, 'hz': 0.5, 'damp': 0.3, 'max': 3.5, 'idle': 2},
+    {'kind': 'sway', 'name': 'Coat hem', 'mask': [3, 1], 'gain': 1.8, 'wind': 3.5, 'hz': 0.42, 'damp': 0.32, 'max': 6},
+    {'kind': 'swing', 'name': 'Tie', 'hold': False, 'mask': [3, 2], 'pivot': list(KNOT), 'length': TIE_LEN,
+     'gain': 1.2, 'wind': 1.2, 'hz': 0.7, 'damp': 0.25, 'max': 2.5},
 ]
 line = lambda v: json.dumps(v, separators=(',', ':'))
-(img / 'makise-rig.js').write_text(
-    '// The rig that brings img/makise.webp to life (see js/rig.js). Edit it in tools/rig.html.\n'
-    f'Rig.add({{\n  "size": {line([W, H])},\n  "maps": {line(names)},\n  "effects": [\n'
-    + ',\n'.join('    ' + line(e) for e in effects) + '\n  ]\n});\n', newline='\n')
+with open(img / 'makise-rig.js', 'w', newline='\n') as f:
+    f.write('// The rig that brings img/makise.webp to life (see js/rig.js). Edit it in tools/rig.html.\n'
+            f'Rig.add({{\n  "size": {line([W, H])},\n  "maps": {line(names)},\n  "effects": [\n'
+            + ',\n'.join('    ' + line(e) for e in effects) + '\n  ]\n});\n')
 
 for f in ['makise-rig.js', *names]:
     print(f'wrote img/{f} ({(img / f).stat().st_size // 1024} KB)')

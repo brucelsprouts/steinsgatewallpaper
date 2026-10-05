@@ -74,15 +74,17 @@ Made by `rigmap.py` from each eye's lash lines, measured from the picture column
 - **Idle**, a new setting for Sway and Swing: how far it drifts about on its own, slowly,
   as if she shifted it (px, 0 by default). Each effect drifts on its own (a mix of slow
   waves, its timing taken from its name), so the forearm and the upper arm aren't in step.
-- **Left arm** (the shoulder swing): wind 1.65 → 2, limit 5.8 → 7.5, idle 2.5.
+- **Left arm** (the shoulder swing): wind 1.65 → 2, idle 2.5, its limit kept at 5.8 px
+  (it carries the coat piece beside the arm too, and any further folds that coat's edges).
   **Left forearm**: idle 2.
 
 ## Her coat
 
 - **Coat hem**, a new Sway: the jacket around her legs, both sides, free toward the hem
   and still at the waist, less near her body, and fading out beside her left forearm so
-  neither pulls the other. A slower, heavier spring than her hair, swinging further in the
-  breeze (limit 10 px).
+  neither pulls the other. A slower, heavier spring than her hair (limit 6 px, with wide
+  soft edges: at 10 px it folded the coat's edges over the narrow gap beside her forearm
+  and at the cuff on the left).
 - **Coat flutter** ripples double (0.35 → 0.8 px), so the folds in the cuffs and hem
   shimmy more.
 - **Tie**, a new Swing from the knot (425, 292), length 325: its lower part sways up to

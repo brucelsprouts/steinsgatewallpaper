@@ -407,6 +407,7 @@ function masks(rig) {
 // flick of the cursor), stepped at `fps`. How far each has swung, in the picture's px.
 function trail(fps, at) {
   const { Rig, Portrait } = loadRig(), rig = shippedRig(Rig), m = new Rig.Motion();
+  for (const e of rig.effects) if ('idle' in e) e.idle = 0; // the springs alone, not their own drifting
   const fit = Portrait.fitOf({ naturalWidth: rig.size[0], naturalHeight: rig.size[1] }, 0.6);
   const hair = rig.effects.find(e => e.kind === 'sway'), arms = rig.effects.filter(e => e.kind === 'swing');
   const out = [];
@@ -416,7 +417,9 @@ function trail(fps, at) {
     cam += ((t < 5 ? -1 : 1) - cam) * (1 - Math.exp(-(t - last) / 0.78));
     last = t;
     m.update(t, rig.effects, { x: (at ? at(t) : -cam * 12.6) / fit, y: 0 });
-    out.push({ t, ...m.spring(hair).off(), arms: arms.map(a => m.spring(a).off().x) });
+    // Where the breeze alone would hold each arm.
+    const rests = arms.map(a => a.max * Math.tanh(m.air(t).x * a.wind / a.max));
+    out.push({ t, ...m.spring(hair).off(), arms: arms.map(a => m.spring(a).off().x), rests });
   }
   return out;
 }
@@ -436,8 +439,8 @@ test('rig: the arms trail a move too, more gently than the hair, and settle', ()
   for (const side of [0, 1]) {
     const arm = Math.max(...during.map(s => Math.abs(s.arms[side])));
     assert.ok(arm > 0.8 && arm < hair, `arm ${side} swung ${arm.toFixed(1)} px (hair ${hair.toFixed(1)})`);
-    const rest = Math.max(...after.map(s => Math.abs(s.arms[side])));
-    assert.ok(rest < 3.3, `arm ${side} still ${rest.toFixed(1)} px out`);
+    const rest = Math.max(...after.map(s => Math.abs(s.arms[side] - s.rests[side])));
+    assert.ok(rest < 3.3, `arm ${side} still ${rest.toFixed(1)} px from where the breeze holds it`);
   }
 });
 
@@ -564,7 +567,39 @@ test('rig: the rig shipped for makise.webp fits it, and its shader reads every m
   for (const e of rig.effects) assert.ok(e.mask && src.includes(`a${e.mask[0]}.${'rgb'[e.mask[1]]}`), `${e.name} has no mask`);
   const count = s => src.split(s).length - 1;
   assert.strictEqual(count('d += turn('), rig.effects.filter(e => e.kind === 'swing').length);
-  assert.strictEqual(count('d += ') - count('d += turn('), rig.effects.filter(e => !['hold', 'swing'].includes(e.kind)).length);
+  assert.strictEqual(count('d += ') - count('d += turn('), rig.effects.filter(e => !['hold', 'swing', 'blink'].includes(e.kind)).length);
+  assert.strictEqual(count('l += '), rig.effects.filter(e => e.kind === 'blink').length);
+});
+
+test('rig: the shipped rig blinks both eyes shut, and nothing else', () => {
+  const { Rig } = loadRig(), rig = shippedRig(Rig), mask = masks(rig);
+  const blinks = rig.effects.filter(e => e.kind === 'blink');
+  assert.strictEqual(blinks.length, 1, 'one blink, so both eyes shut at once');
+  const m = new Rig.Motion();
+  m.blink(50);
+  const vals = m.values(50 + blinks[0].span * 0.42, rig.effects);
+  // Columns of each eye: the bottom of its upper lash, and the top of its lower lid.
+  for (const [x, lash, lid] of [[372, 151, 170], [380, 149, 171], [388, 150, 168], [448, 129, 148], [452, 128, 147], [458, 127, 148]]) {
+    for (let y = lash + 2; y <= lid - 2; y++) {
+      const q = Rig.blinked(rig.effects, vals, mask, [x, y]);
+      assert.ok(q[1] <= lash + 1, `shut, ${x},${y} shows ${q[1].toFixed(1)} (the lash ends at ${lash})`);
+    }
+  }
+  for (let y = 0; y < rig.size[1] * 0.6; y += 5) {
+    for (let x = 0; x < rig.size[0]; x += 5) {
+      if (x > 350 && x < 475 && y > 100 && y < 180) continue;
+      assert.deepStrictEqual([...Rig.blinked(rig.effects, vals, mask, [x, y])], [x, y], `the blink moves ${x},${y}`);
+    }
+  }
+});
+
+test('rig: her left forearm bends at the elbow, a little, without dragging the coat beside it', () => {
+  const { Rig } = loadRig(), rig = shippedRig(Rig), mask = masks(rig);
+  const fore = rig.effects.find(e => e.name === 'Left forearm'), at = q => mask(fore.mask[0], q)[fore.mask[1]];
+  assert.ok(fore && fore.kind === 'swing' && fore.max <= 4, 'a small swing');
+  assert.ok(at([712, 820]) > 0.9 && at([700, 720]) > 0.9, 'the hand and forearm turn with it');
+  assert.ok(at([600, 420]) < 0.02, 'the upper arm leaves it to the shoulder');
+  for (const q of [[580, 700], [590, 800], [600, 880]]) assert.ok(at(q) < 0.02, `the coat at ${q} is dragged ${at(q).toFixed(2)}`);
 });
 
 // The shipped rig at its strongest: the springs as far as 3 minutes of hard flicks of the
