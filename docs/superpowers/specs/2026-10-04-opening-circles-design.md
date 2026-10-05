@@ -121,3 +121,38 @@ with the meter, against 60 now, since the clock's face takes less.
   - the clock before and after;
   - the circles close up.
 - Frame cost before and after.
+
+## As built
+
+Where the build differs from the plan above, from tuning on stills:
+
+- **Circles as bright as their lines.** At 80% of the lines' brightness they didn't
+  register in the full frame, so each is drawn with the same pen as the growth it belongs
+  to: the same brightness and width.
+- **Room is tight.** The clock's face covers most of the right half, and Makise's figure
+  the middle of the left.
+  - Circles are aimed only at places shapes may go. They aren't left to the drawing's
+    "room for a shape", which made them rare.
+  - They may tuck up to a third of their radius in behind her.
+  - They stop short of the clock's numerals (its outer tenth), not half their radius
+    outside its rim.
+  - The right third halves them by chance, as for the other shapes.
+- **What comes first.** The circle is chosen first, then up to six places are tried for
+  it.
+  - Where a new line crosses one staying: a pulley 32% of the time, a fan 23% and an
+    hourglass 7%.
+  - Otherwise, along a new line: a resting circle three times in four, else an hourglass.
+  - A growth tries for a circle 40% of the time.
+- **Fans** are 80–220 px across, not 110–260. Of the four ways round a crossing, the
+  first that fits is taken, starting from one at random.
+
+Measured:
+
+- **Circles at a time:** on average 5.5–7.8 over 20 minutes (four seeds), between 2 and
+  10 at any moment, with all four kinds.
+- **Growths at a time:** 56 round Makise and 50–51 round the meter.
+- **The drawing's cost at 1440p, unchanged:**
+  - about 0.05 ms a frame to draw;
+  - about 0.01 ms a frame to update;
+  - at most about 3 ms for the occasional full redraw of its cached image;
+  - at most 0.6 ms for planning a growth.

@@ -212,14 +212,28 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
   along them; compass arcs from one crossing through another; links to the next line
   over; and a ring or a dot where a line turns or sets off.
 
+  A few bigger circles from the opening's drawings hang off them too, up to ten at a
+  time, well apart and drawn with the same pen as their lines:
+  - pulley rings where two lines cross;
+  - compass fans between two crossing lines, with ruler ticks;
+  - hourglass circles (two opposite wedges filled in), which turn a step now and then
+    like the clocks;
+  - circles resting on a line.
+
   It slowly redraws itself, as if being drafted. Every few seconds the oldest growth
   erases itself, its shapes first, and a new one grows where the drawing is barest,
   drawn as one stroke, its shapes appearing as the pen passes them. Glints run along the
   lines, now and then turning where they cross, and the dials tick round like the
-  clocks. It moves only with the cursor, as one deep plane. It thins out around the
-  centrepiece and fades to nothing in the middle of it, and the right third, where the
-  clockwork is busiest, has fewer shapes. A worldline shift wipes it outward from the
-  centrepiece and grows a new one within a few seconds.
+  clocks. It moves only with the cursor, as one deep plane.
+  - Around Makise it runs on behind her and fills the space round her, and only its
+    shapes keep off her.
+  - Around the meter it thins out and fades to nothing in the middle, so the digits stay
+    clear.
+  - Over the big clock on the right it grows half as thick, with no shapes, so the clock
+    reads first. The right third, where the clockwork is busiest, has fewer shapes.
+
+  A worldline shift wipes it outward from the centrepiece and grows a new one within a
+  few seconds.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
@@ -317,7 +331,7 @@ Code layout (`wallpaper/js`):
 | `paint.js` | Drafting marks, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |
 | `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, the mottled backdrop, halftone patches and worn print, bloom, lens dust, grain |
-| `schematic.js` | The schematics: one faint drafting drawing that grows like a crystal, lines first with shapes hanging off them, slowly redrawing itself behind everything |
+| `schematic.js` | The schematics: one faint drafting drawing that grows like a crystal, lines first with shapes and circles from the opening hanging off them, slowly redrawing itself behind everything |
 | `scene.js` | Composition, depth, parallax |
 | `display.js` | What the meter shows and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |
