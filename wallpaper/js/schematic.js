@@ -9,14 +9,17 @@
 // along a line; rings, diamonds, crosshairs and now and then a small dial where lines
 // cross; ruler ticks and hatching along them; compass arcs from one crossing through
 // another; links to the next line over; and a ring or a dot where a line turns or sets
-// off. It slowly redraws itself, as if being drafted: every few seconds the oldest growth
+// off. A few bigger circles from the opening's drawings hang off them too: pulley rings and
+// compass fans where lines cross, hourglass circles on them, and circles resting on them.
+// It slowly redraws itself, as if being drafted: every few seconds the oldest growth
 // erases itself, its shapes first, and a new one grows where the drawing wants it, drawn
 // as one stroke, its shapes appearing as the pen passes them (trim paths, staggered).
-// Glints run along the lines, now and then turning where they cross, and the dials tick.
-// A worldline shift wipes it outward from the centrepiece and grows a new one. What has
-// settled is drawn once into a cached sheet and only what moves is drawn each frame, on a
-// layer at about half a px per design px, so it's soft. The layer is laid over the black
-// with Screen before anything else is drawn.
+// Glints run along the lines, now and then turning where they cross; the dials tick and the
+// hourglasses turn. It runs on behind Makise, but keeps a clear middle round the meter,
+// and grows thinner over the big clock so the clock reads first. A worldline shift wipes it
+// outward from the centrepiece and grows a new one. What has settled is drawn once into a
+// cached sheet and only what moves is drawn each frame, on a layer at about half a px per
+// design px, so it's soft. The layer is laid over the black with Screen.
 const Schematic = (() => {
   const { TAU, canvas, clamp, smooth, ease, stepped, fbm2 } = Kit;
 
@@ -35,6 +38,8 @@ const Schematic = (() => {
   const TAIL = 110;           // a glint's length (design px)
   const APART = 45;           // the closest two lines running the same way may lie (design px)
   const BIG = 0.1;            // the most of the drawing one formation may hold before it stops growing
+  const CIRCLES = 10;         // the most circles from the opening at a time
+  const FILL = 0.45;          // how bright a filled shape is, for its lines
   const COLS = Math.ceil((W + 2 * M) / CELL), ROWS = Math.ceil((H + 2 * M) / CELL);
 
   // ---------- Timing ----------
@@ -98,6 +103,14 @@ const Schematic = (() => {
     g.arc(x, y, k, 0, TAU);
   }
 
+  // Rings round e's centre, swept round one after another as by a compass, and a dot in
+  // the middle if it has one.
+  function rings(g, e, on, off) {
+    const n = e.radii.length;
+    e.radii.forEach((R, j) => arcPath(g, e.x, e.y, R, e.a0 + j * 0.9, TAU, stagger(off, j, n), stagger(on, j, n)));
+    if (e.dot) dot(g, e.x, e.y, 2.4, on, off);
+  }
+
   // ---------- Broken lines ----------
   // A line's breaks are gaps along it, sorted [from, to] fractions of its length.
 
@@ -143,8 +156,14 @@ const Schematic = (() => {
 
   // ---------- What's drawn ----------
   // Each kind: `path` adds it to the path being drawn at time t, drawn `on` of the way and
-  // erased `off` of the way; `pts`, points along it for the density; `live`, if it moves
-  // while it stays, so it's drawn every frame and never into the sheet.
+  // erased `off` of the way; `fill`, if it has any, adds what's filled in, dimmer; `pts`,
+  // points along it for the density; `live`, if it moves while it stays, so it's drawn
+  // every frame and never into the sheet.
+  const RINGS = { path: (g, e, t, on, off) => rings(g, e, on, off), pts: e => e.radii.flatMap(R => around(e.x, e.y, R)) };
+
+  // Where an hourglass points at time t: a step of 45° now and then, eased, like the clocks.
+  const turned = (e, t) => e.a + stepped(t, e.every, 0.6, e.dir * Math.PI / 4, e.ph);
+
   const KINDS = {
     // A line, drawn on from its start and trimmed off outward from `cut`: from its start
     // (0) when it's erased, from nearest the centrepiece when a shift wipes it. Its breaks
@@ -170,14 +189,7 @@ const Schematic = (() => {
 
     // One to three rings where two lines cross, swept round one after another as by a
     // compass, sometimes with a dot in the middle.
-    ring: {
-      path(g, e, t, on, off) {
-        const n = e.radii.length;
-        e.radii.forEach((R, j) => arcPath(g, e.x, e.y, R, e.a0 + j * 0.9, TAU, stagger(off, j, n), stagger(on, j, n)));
-        if (e.dot) dot(g, e.x, e.y, 2.4, on, off);
-      },
-      pts: e => e.radii.flatMap(R => around(e.x, e.y, R)),
-    },
+    ring: RINGS,
 
     // A diamond on a crossing, its corners on the two lines, drawn round from a corner.
     diamond: {
@@ -267,12 +279,83 @@ const Schematic = (() => {
       },
       pts: e => around(e.x, e.y, e.R).concat(around(e.x, e.y, e.R * 0.8)),
     },
+
+    // ---- Circles from the opening's drawings, a few at a time ----
+
+    // Pulley rings where two lines cross: an outer ring and an inner one about a third its
+    // size, sometimes one between, swept round one after another, and sometimes a dot in
+    // the middle. The lines run through them.
+    pulley: RINGS,
+
+    // An hourglass circle, as in the opening and the official art: a small ring, sometimes
+    // with another round it, and two opposite wedges filled in, along or across its line.
+    // Its rings are swept round, then its wedges open out (and close first as it goes).
+    // Like the clocks, it turns a step now and then.
+    hourglass: {
+      live: true,
+      angle: turned,
+      path(g, e, t, on, off) {
+        const n = e.radii.length;
+        e.radii.forEach((R, j) => arcPath(g, e.x, e.y, R, e.a0 + j * 0.9, TAU, stagger(off, j + 1, n + 1), stagger(on, j, n + 1)));
+      },
+      fill(g, e, t, on, off) {
+        const n = e.radii.length, w = e.half * stagger(on, n, n + 1) * (1 - stagger(off, 0, n + 1));
+        if (w < 0.01) return;
+        const a = turned(e, t);
+        for (const s of [a, a + Math.PI]) {
+          g.moveTo(e.x, e.y);
+          g.arc(e.x, e.y, e.radii[0], s - w, s + w);
+          g.closePath();
+        }
+      },
+      pts: e => e.radii.flatMap(R => around(e.x, e.y, R)),
+    },
+
+    // A compass fan where two lines cross: an arc between them, swept round with the
+    // compass's arm showing, then ruler ticks along it (every fifth longer), then sometimes
+    // an inner arc and a small ring at the centre. Its two straight sides are the lines.
+    fan: {
+      path(g, e, t, on, off) {
+        const q = i => [stagger(off, i, 3), stagger(on, i, 3)], [a, b] = q(0), [c, d] = q(1), [p, w] = q(2);
+        arcPath(g, e.x, e.y, e.R, e.a0, e.sweep, a, b);
+        if (b < 1 && off <= 0) {
+          const s = e.a0 + e.sweep * b;
+          seg(g, e.x, e.y, e.x + Math.cos(s) * e.R, e.y + Math.sin(s) * e.R, 0, Math.min(1, b * 8));
+        }
+        for (let i = 0; i <= e.n; i++) {
+          const u = i / e.n;
+          if (d <= 0 || c >= 1 || u < c || u > d) continue;
+          const s = e.a0 + e.sweep * u, cs = Math.cos(s), sn = Math.sin(s), r0 = e.R - (i % 5 ? 7 : 13);
+          g.moveTo(e.x + cs * r0, e.y + sn * r0);
+          g.lineTo(e.x + cs * e.R, e.y + sn * e.R);
+        }
+        if (e.inner) arcPath(g, e.x, e.y, e.R * e.inner, e.a0, e.sweep, p, w);
+        if (e.hub) arcPath(g, e.x, e.y, e.hub, e.a0, TAU, p, w);
+      },
+      pts: e => alongArc(e.x, e.y, e.R, e.a0, e.sweep).concat(e.inner ? alongArc(e.x, e.y, e.R * e.inner, e.a0, e.sweep) : []),
+    },
+
+    // A circle resting on a line: swept round from where it touches, then its radius drawn
+    // out to there, and a dot popping in at its centre.
+    rest: {
+      path(g, e, t, on, off) {
+        const [a, b] = [stagger(off, 0, 2), stagger(on, 0, 2)], [c, d] = [stagger(off, 1, 2), stagger(on, 1, 2)];
+        arcPath(g, e.x, e.y, e.R, e.a0, e.dir * TAU, a, b);
+        seg(g, e.x, e.y, e.px, e.py, c, d);
+        dot(g, e.x, e.y, 2.4, d, c);
+      },
+      pts: e => around(e.x, e.y, e.R),
+    },
   };
   const SHAPES = Object.keys(KINDS).filter(k => k !== 'line');
 
   // ---------- Geometry ----------
 
   const inFrame = (x, y, pad = 0) => x >= pad && x <= W - pad && y >= pad && y <= H - pad;
+
+  // How much of the room for shapes is left at x: in the right third, where the clockwork
+  // is busiest, half.
+  const busy = x => 1 - 0.5 * smooth(1500, 1900, x);
 
   // Where lines a and b cross: how far along each (0 to 1), and where; null if they don't.
   function cross(a, b) {
@@ -433,14 +516,19 @@ const Schematic = (() => {
       return c < 0 ? 0 : this.T[c] * lvl - this.ink[c];
     }
 
-    // How much room there is for a shape at x, y, from 0 (none) to 1: none in the clear
-    // core, behind Makise or on a quiet face; less where it's full; and in the right third,
-    // where the clockwork is busiest, half as much.
-    room(x, y, lvl) {
+    // Whether shapes may go at x, y at all: not in the clear core, behind Makise or on a
+    // quiet face.
+    allowed(x, y) {
       const c = this.cell(x, y);
-      if (c < 0 || this.T[c] < 0.05 || this.hidden(x, y) || this.inFace(x, y) > 0) return 0;
-      const full = lvl > 0 ? this.ink[c] / (this.T[c] * lvl * 1.2) : 0;
-      return clamp(1 - full) * (1 - 0.5 * smooth(1500, 1900, x));
+      return c >= 0 && this.T[c] >= 0.05 && !this.hidden(x, y) && this.inFace(x, y) === 0;
+    }
+
+    // How much room there is for a shape at x, y, from 0 (none) to 1: none where shapes may
+    // not go, less where it's full, and half as much in the right third.
+    room(x, y, lvl) {
+      if (!this.allowed(x, y)) return 0;
+      const c = this.cell(x, y), full = lvl > 0 ? this.ink[c] / (this.T[c] * lvl * 1.2) : 0;
+      return clamp(1 - full) * busy(x);
     }
 
     // A shape (of the given kind, if any) staying within `d` of x, y, or among those `made`.
@@ -521,10 +609,14 @@ const Schematic = (() => {
           made.push({ kind: 'ring', x: L.x0, y: L.y0, u: 0, deps: [L, L.from], radii: [3 + r() * 6], a0: r() * TAU, dot: r() < 0.5, inT: 0.4 });
         }
       }
+      // Now and then a circle from the opening.
+      if (r() < 0.4) this.circle(lines, r, made);
+      // Shapes are a little fainter and finer than their lines; the circles from the opening
+      // are drawn with the same pen as them.
       for (const e of made) {
         const L = e.deps[0];
-        e.k = k * (0.7 + r() * 0.3);
-        e.lw = 1 + r() * 0.5;
+        e.k = e.disc ? k : k * (0.7 + r() * 0.3);
+        e.lw = e.disc ? lw : 1 + r() * 0.5;
         e.born = L.born + L.inT * reach(e.u) + (0.05 + r() * 0.25) / fast;
         e.inT /= fast;
       }
@@ -774,6 +866,99 @@ const Schematic = (() => {
       return { kind: 'link', ...base, x0: x, y0: y, x1: hit.x, y1: hit.y, deps: [L, hit.o], ext: 0, inT: 0.3 + hit.u * 0.6 };
     }
 
+    // Now and then a circle from the opening on new lines `lines`. What it is comes first:
+    // where one crosses a line staying, a pulley's rings, a fan or an hourglass; along one
+    // (or if none crosses another), a circle resting on it or an hourglass strung on it.
+    // Then, of up to six tried, the first with room for it (see roomFor).
+    circle(lines, r, made) {
+      if (this.circles(made) >= CIRCLES) return;
+      const xs = [];
+      for (const L of lines) {
+        for (const o of this.lines) {
+          const c = cross(L, o);
+          if (c && inFrame(c.x, c.y, 60) && solid(L, c.u) && solid(o, c.v) && this.allowed(c.x, c.y)) xs.push({ ...c, L, o });
+        }
+      }
+      const v = r(), kind = xs.length && v < 0.62 ? (v < 0.32 ? 'pulley' : v < 0.55 ? 'fan' : 'hourglass') : r() < 0.75 ? 'rest' : 'hourglass';
+      const at = xs.length && v < 0.62;
+      for (let i = 0; i < 6; i++) {
+        let e = null;
+        if (at) {
+          const c = xs[Math.floor(r() * xs.length)], L = c.L, base = { x: c.x, y: c.y, u: c.u, deps: [L, c.o] };
+          e = kind === 'pulley' ? this.pulley(base, r) : kind === 'fan' ? this.fan(L, c, base, r) : this.hourglass(base, r() < 0.5 ? L : c.o, r);
+        } else {
+          // Somewhere along one that's solid, well in the frame and where shapes may go.
+          const L = lines[Math.floor(r() * lines.length)], u = 0.08 + r() * 0.84, x = L.x0 + (L.x1 - L.x0) * u, y = L.y0 + (L.y1 - L.y0) * u;
+          if (!solid(L, u) || !inFrame(x, y, 60) || !this.allowed(x, y)) continue;
+          const base = { x, y, u, deps: [L] };
+          e = kind === 'rest' ? this.rest(L, base, r) : this.hourglass(base, L, r);
+        }
+        if (e && this.roomFor(e.disc, made, r)) { made.push(e); return; }
+      }
+    }
+
+    // Each circle from the opening carries `disc`, a circle round all of it, to keep it
+    // apart from the others and where it may go.
+
+    pulley(base, r) {
+      const R = 36 + r() * 74, radii = [R, ...(r() < 0.3 ? [R * (0.6 + r() * 0.1)] : []), R * (0.28 + r() * 0.14)];
+      return { kind: 'pulley', ...base, radii, a0: r() * TAU, dot: r() < 0.5, inT: 0.8 + 0.35 * radii.length, disc: { x: base.x, y: base.y, R } };
+    }
+
+    // Its wedges point along line L, or across it.
+    hourglass(base, L, r) {
+      const R = 16 + r() * 28, radii = r() < 0.35 ? [R, R * (1.35 + r() * 0.2)] : [R];
+      return {
+        kind: 'hourglass', ...base, radii, a0: r() * TAU, a: Math.atan2(L.uy, L.ux) + (r() < 0.5 ? 0 : Math.PI / 2), half: 0.45 + r() * 0.15,
+        every: 5 + r() * 6, dir: r() < 0.5 ? -1 : 1, ph: r(), inT: 1.1, disc: { x: base.x, y: base.y, R: radii[radii.length - 1] },
+      };
+    }
+
+    // Between L and the line it crosses at c, out along each one way: a fan 80 to 220 px
+    // across that both reach past (where they're solid), at 23° to 126°. Of the four ways
+    // round the crossing, the first that fits, from one at random.
+    fan(L, c, base, r) {
+      const o = c.o, want = 80 + r() * 140, k = Math.floor(r() * 4), inner = r() < 0.4 ? 0.5 + r() * 0.12 : 0, hub = r() < 0.6 ? 6 + r() * 5 : 0;
+      for (let i = 0; i < 4; i++) {
+        const sL = (k + i) % 2 ? 1 : -1, sO = (k + i) % 4 < 2 ? 1 : -1;
+        const far = Math.min(sL > 0 ? (1 - c.u) * L.len : c.u * L.len, sO > 0 ? (1 - c.v) * o.len : c.v * o.len) * 0.95;
+        const R = Math.min(want, far), a0 = Math.atan2(L.uy * sL, L.ux * sL);
+        const sweep = ((Math.atan2(o.uy * sO, o.ux * sO) - a0 + 3 * Math.PI) % TAU) - Math.PI, h = Math.abs(sweep) / 2, mid = a0 + sweep / 2;
+        if (R < 80 || h < 0.2 || h > 1.1 || !solid(L, c.u + sL * R / L.len) || !solid(o, c.v + sO * R / o.len)) continue;
+        return {
+          kind: 'fan', ...base, R, a0, sweep, n: Math.max(4, Math.round(h * 2 * R / 16)), inner, hub, inT: 1.4 + R / 400,
+          disc: { x: base.x + Math.cos(mid) * R / 2, y: base.y + Math.sin(mid) * R / 2, R: R * Math.sqrt(Math.max(0.25, 1.25 - Math.cos(h))) },
+        };
+      }
+      return null;
+    }
+
+    // Touching L where `base` is, on either side.
+    rest(L, base, r) {
+      const R = 28 + r() * 62, side = r() < 0.5 ? -1 : 1;
+      if (Math.min(base.u, 1 - base.u) * L.len < R * 0.6) return null;
+      const x = base.x + L.nx * side * R, y = base.y + L.ny * side * R;
+      return {
+        ...base, kind: 'rest', x, y, px: base.x, py: base.y, R, a0: Math.atan2(base.y - y, base.x - x), dir: r() < 0.5 ? -1 : 1,
+        inT: 1 + R / 120, disc: { x, y, R },
+      };
+    }
+
+    // How many circles from the opening there are, staying or among those `made`.
+    circles(made) { return made.concat(this.items).filter(e => e.disc && !e.leaving).length; }
+
+    // Whether there's room for a circle from the opening round `d`: in the frame, where
+    // shapes may go (half the time in the right third), no more than a third of the way in
+    // behind Makise, short of a quiet face's numerals (its outer tenth), and at least 80 px
+    // from the other circles.
+    roomFor(d, made, r) {
+      const { x, y, R } = d, pad = 20;
+      if (x - R < pad || x + R > W - pad || y - R < pad || y + R > H - pad || !this.allowed(x, y) || r() > busy(x)) return false;
+      if (this.figure.some(f => ((x - f.x) / (f.rx + R / 3)) ** 2 + ((y - f.y) / (f.ry + R / 3)) ** 2 < 1)) return false;
+      if (this.faces.some(f => Math.hypot(x - f.x, y - f.y) < f.r * 0.9 + R)) return false;
+      return !made.concat(this.items).some(e => e.disc && !e.leaving && Math.hypot(e.disc.x - x, e.disc.y - y) < e.disc.R + R + 80);
+    }
+
     add(c) {
       if (!c) return;
       for (const e of c.items) this.tally(e, 1);
@@ -903,7 +1088,7 @@ const Schematic = (() => {
     draw(ctx, view, t, a, m = { x: 0, y: 0 }) {
       if (!this.layer || a <= 0) return;
       const q = this.q, s = this.sheet.getContext('2d'), g = this.layer.getContext('2d');
-      for (const c of [s, g]) { c.strokeStyle = `rgb(${LINE})`; c.lineCap = c.lineJoin = 'round'; }
+      for (const c of [s, g]) { c.strokeStyle = c.fillStyle = `rgb(${LINE})`; c.lineCap = c.lineJoin = 'round'; }
       // The sheet: what has settled, drawn once, alike lines and shapes together.
       if (this.stale || this.pending.length) {
         const list = this.stale ? this.items.filter(e => e.inSheet) : this.pending, groups = new Map();
@@ -920,6 +1105,12 @@ const Schematic = (() => {
           s.beginPath();
           for (const e of es) KINDS[e.kind].path(s, e, t, 1, 0);
           s.stroke();
+          const fills = es.filter(e => KINDS[e.kind].fill);
+          if (!fills.length) continue;
+          s.globalAlpha = es[0].k * FILL;
+          s.beginPath();
+          for (const e of fills) KINDS[e.kind].fill(s, e, t, 1, 0);
+          s.fill();
         }
         this.stale = false;
         this.pending.length = 0;
@@ -940,6 +1131,11 @@ const Schematic = (() => {
         g.beginPath();
         KINDS[e.kind].path(g, e, t, on, off);
         g.stroke();
+        if (!KINDS[e.kind].fill) continue;
+        g.globalAlpha = e.k * FILL;
+        g.beginPath();
+        KINDS[e.kind].fill(g, e, t, on, off);
+        g.fill();
       }
       // The glints: brightest at the head, fading along the tail, and in as they set off.
       g.lineWidth = 2.2;
@@ -976,5 +1172,5 @@ const Schematic = (() => {
     }
   }
 
-  return { Field, KINDS, SHAPES, COUNT, AGE, stagger, phase, reach, cross };
+  return { Field, KINDS, SHAPES, COUNT, AGE, CIRCLES, FILL, stagger, phase, reach, cross };
 })();

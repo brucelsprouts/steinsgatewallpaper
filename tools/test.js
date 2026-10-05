@@ -650,7 +650,9 @@ test('schematic: every shape lies on its lines, and goes when any of them goes',
     for (const e of field.items) {
       if (isLine(e)) continue;
       shapes++;
-      const L = e.deps[0], on = [[e.x, e.y, L]];
+      // A circle resting on a line touches it, its centre its radius away.
+      const L = e.deps[0], on = [e.kind === 'rest' ? [e.px, e.py, L] : [e.x, e.y, L]];
+      if (e.kind === 'rest') assert.ok(Math.abs(offLine(L, e.x, e.y) - e.R) < 0.5, 'a circle not resting on its line');
       if (e.kind === 'link') on.push([e.x1, e.y1, e.deps[1]]);
       else if (e.deps[1]) on.push([e.x, e.y, e.deps[1]]);
       if (e.kind === 'diamond') e.corners.forEach(([x, y], i) => on.push([x, y, e.deps[i % 2]]));
@@ -788,6 +790,48 @@ test('schematic: few small shapes, lines first: no gears, no diamonds side by si
     const ink = list => list.reduce((s, e) => s + S.KINDS[e.kind].pts(e).length * e.k, 0);
     assert.ok(ink(staying.filter(isLine)) >= 2 * ink(shapes), `nearly as much shape as line at ${t}s`);
   });
+});
+
+test('schematic: a few circles from the opening, on the lines, well apart, never behind Makise or on the big clock', () => {
+  const kinds = new Set();
+  let sum = 0, samples = 0;
+  runField(14, 1200, (t, field, S) => {
+    const cs = field.items.filter(e => e.disc && !e.leaving);
+    assert.ok(cs.length <= S.CIRCLES, `${cs.length} circles at ${t}s`);
+    for (let i = 0; i < cs.length; i++) {
+      const a = cs[i].disc, k = cs[i].kind;
+      kinds.add(k);
+      assert.ok(a.x - a.R >= 0 && a.x + a.R <= 2560 && a.y - a.R >= 0 && a.y + a.R <= 1440, `a ${k} out of the frame`);
+      // Short of the clock's numerals, and no more than a third of the way in behind her.
+      assert.ok(Math.hypot(a.x - ASTROLABE.x, a.y - ASTROLABE.y) - a.R >= ASTROLABE.r * 0.9, `a ${k} on the clock's face`);
+      assert.ok(!MAKISE_FIGURE.some(f => ((a.x - f.x) / (f.rx + a.R / 3)) ** 2 + ((a.y - f.y) / (f.ry + a.R / 3)) ** 2 < 1), `a ${k} behind Makise`);
+      for (let j = i + 1; j < cs.length; j++) {
+        const b = cs[j].disc;
+        assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.R + b.R + 80, `a ${k} and a ${cs[j].kind} close together at ${t}s`);
+      }
+    }
+    if (t >= 60) { sum += cs.length; samples++; }
+  });
+  const mean = sum / samples;
+  assert.ok(mean >= 5 && mean <= 10, `${mean.toFixed(1)} circles at a time on average`);
+  for (const k of ['pulley', 'hourglass', 'fan', 'rest']) assert.ok(kinds.has(k), `no ${k} in 20 minutes`);
+});
+
+test('schematic: hourglasses turn a step now and then, like the clocks', () => {
+  const { Schematic: S } = loadSchematic(), turn = S.KINDS.hourglass.angle;
+  assert.ok(S.KINDS.hourglass.live, 'hourglasses drawn into the sheet, where they cannot turn');
+  for (const e of [{ a: 0.3, every: 7, dir: 1, ph: 0.4 }, { a: -1, every: 10.5, dir: -1, ph: 0.9 }]) {
+    let moving = 0, n = 0;
+    for (let t = 0; t < 120; t += 0.05) {
+      n++;
+      if (Math.abs(turn(e, t + 0.05) - turn(e, t)) < 1e-9) {
+        // Holding still: a whole number of steps round.
+        const k = (turn(e, t) - e.a) / (Math.PI / 4);
+        assert.ok(Math.abs(k - Math.round(k)) < 1e-6, `an hourglass held still part way through a step at ${t.toFixed(2)}s`);
+      } else moving++;
+    }
+    assert.ok(moving / n < 0.12, `an hourglass turning ${(100 * moving / n).toFixed(0)}% of the time`);
+  }
 });
 
 test('schematic: glints run only along lines, turning only where lines cross', () => {
