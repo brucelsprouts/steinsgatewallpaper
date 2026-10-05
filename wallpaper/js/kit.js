@@ -81,5 +81,12 @@ const Kit = (() => {
     },
   };
 
-  return { TAU, canvas, hash, rng, noise, noise2, fbm2, pnoise2, pfbm2, clamp, smooth, ease };
+  // Stepped motion: `amount` every `period` s, each step eased over `dur` s, like a
+  // clock's hand ticking.
+  function stepped(t, period, dur, amount, offset = 0) {
+    const u = t / period + offset, n = Math.floor(u);
+    return amount * (n + ease.inOut(clamp((u - n) * period / dur)));
+  }
+
+  return { TAU, canvas, hash, rng, noise, noise2, fbm2, pnoise2, pfbm2, clamp, smooth, ease, stepped };
 })();

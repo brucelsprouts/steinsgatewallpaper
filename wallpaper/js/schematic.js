@@ -1,410 +1,635 @@
 'use strict';
-// Schematics: dim drafting sheets behind the whole scene, like the technical drawings in
-// the opening: compass circles and dials, gear trains in outline, squares, diamonds and
-// zig-zags, long construction lines, rulers, crosshairs and scribbled graphite, in pen on
-// grubby paper. They go in the way you'd lay a scan of such a drawing into Photoshop, in
-// Lighten at a low opacity: the black behind everything lifts to a dim warm paper and the
-// lines stay dark. The whole scene is drawn over them, and the pool of dark it keeps
-// around the centrepiece dims them there.
-//
-// Three sheets, baked once, tile; each frame they're double-exposed. Each drifts its own
-// slow way, slowly zooms and turns a little, and fades in and out on a long cycle a third
-// of a cycle apart from the others, so one drawing slowly gives way to the next while
-// there's always about as much drawing.
+// Schematics: faint drafting figures behind the whole scene, like the technical drawings
+// in the opening, in light lines on the dark: dials with ticking rings, dashed orbits,
+// compass constructions, nested squares, pendulums, rulers, crosshairs, long construction
+// lines and branching worldlines. Each has a life of its own, as figures do in motion
+// graphics: it draws itself on, its parts one after another (trim paths, staggered); it
+// lives, ticking, turning, sweeping, swinging or sliding in its own way, at its own depth
+// and drifting its own way; then it erases itself, and a new one draws itself on in the
+// emptiest free spot, so they stay evenly spread and something is always drawing on or
+// erasing, one every few seconds. A worldline shift erases them all at once and draws a
+// fresh set, like the opening's quick cuts. They're drawn at about half a px per design
+// px, so they're soft, and laid over the black with Screen before anything else is drawn.
 const Schematic = (() => {
-  const { TAU, canvas, rng, pfbm2, clamp, smooth } = Kit;
+  const { TAU, canvas, rng, clamp, ease, stepped } = Kit;
 
-  // A sheet, in design px: bigger than the frame, so its repeats lie far apart.
-  const SHEET = { w: 3200, h: 2000 };
-  const FADE = 84; // s for a sheet to fade in, out and back in
-  // Each sheet: its drawing, how big it's shown and how it's turned (rad), how fast it
-  // drifts (design px/s) and how much it drifts with the cursor; and the periods (s) of
-  // its slow zoom and turn.
-  const SHEETS = [
-    { seed: 11, zoom: 1, turn: -0.06, v: [4.2, -1.6], par: 1.1, zp: 170, tp: 230 },
-    { seed: 23, zoom: 1.35, turn: 0.05, v: [-3.1, 2.4], par: 0.9, zp: 205, tp: 190 },
-    { seed: 37, zoom: 0.8, turn: 0.12, v: [1.6, 3.4], par: 1.25, zp: 150, tp: 260 },
-  ];
-  const INK = '22,18,26';      // the pen: a purplish black, as in the opening
-  const PAPER = '255,226,200'; // the paper, in the scene's warm light
+  const LINE = '226,214,198'; // the lines' light: a pale warm white
+  const COUNT = 24;           // figures at a time
+  const AGE = 25;             // s a figure stays at least, before it may be erased
+  const RULES = 3;            // long construction lines at a time, besides
+  const RES = 0.5;            // the layer's px per design px: soft, and the same on any screen
+  const P = 42;               // parallax travel in design px per unit of depth
 
-  // How far each sheet has faded in at time t (0 to 1). Each is fully in for about a
-  // quarter of its cycle, so its lines show at their darkest, and fully out for another;
-  // a third of a cycle apart, so there's always one and a quarter to one and three
-  // quarters sheets' worth showing.
-  const fades = t => SHEETS.map((_, i) => clamp(0.5 + 0.75 * Math.sin(TAU * (t / FADE + i / 3))));
+  // ---------- Timing ----------
 
-  // Where sheet i lies at time t: the point of it at the middle of the frame (design px,
-  // inside the sheet), how big it's shown and how it's turned. `cam` is the cursor as the
-  // near air follows it; the sheets drift with it, deepest of all.
-  function place(i, t, cam) {
-    const s = SHEETS[i], P = 42 * s.par, wrap = (v, n) => ((v % n) + n) % n;
-    return {
-      x: wrap(i * 977 + s.v[0] * t - cam.x * P, SHEET.w),
-      y: wrap(i * 613 + s.v[1] * t - cam.y * P * 0.7, SHEET.h),
-      zoom: s.zoom * (1 + 0.08 * Math.sin(TAU * t / s.zp + i * 2.1)),
-      turn: s.turn + 0.035 * Math.sin(TAU * t / s.tp + i * 1.3),
-    };
+  // How far part i of n has gone when the whole has gone `u` of the way: the parts go one
+  // after another, each starting `s` of a part's time after the one before.
+  const stagger = (u, i, n, s = 0.35) => clamp(u * (1 + s * (n - 1)) - i * s);
+
+  // How far figure f is drawn on, and how far erased, at time t (each 0 to 1, eased).
+  const phase = (f, t) => [ease.inOut(clamp((t - f.born) / f.inT)), ease.inOut(clamp((t - f.dies) / f.outT))];
+
+  // A life `length` s long, drawn on over `inT` s and erased over the last `outT` s of it,
+  // `age` (0 to 1) of the way to being erased already.
+  function lifetime(t, age, length, inT, outT) {
+    const born = t - age * (length - outT);
+    return { born, inT, outT, dies: born + length - outT };
   }
 
-  // ---------- The pen ----------
-  // How heavy it is: line widths and darkness are scaled by these, so the drawing still
-  // reads once the paper is dimmed.
-  const PEN = { w: 1.7, a: 1.4 };
-  const pen = (g, w, a) => { g.lineWidth = w * PEN.w; g.globalAlpha = Math.min(1, a * PEN.a); };
+  // ---------- Trim paths ----------
+  // Each draws only the stretch of its path from `a` to `b` (fractions of its length): a
+  // figure drawn `on` of the way and erased `off` of the way shows `off` to `on`.
 
-  function trace(g, pts) {
+  function arcT(g, R, a0, sweep, a, b) {
+    if (b <= a) return;
     g.beginPath();
-    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.arc(0, 0, R, a0 + sweep * a, a0 + sweep * b, sweep < 0);
     g.stroke();
   }
 
-  // A ruled line, drawn by hand: it bows a hair and wavers. Its ends stay put, so a line
-  // right across the sheet meets itself where the sheet repeats.
-  function line(g, r, x0, y0, x1, y1, wob = 1) {
-    const len = Math.hypot(x1 - x0, y1 - y0) || 1, n = Math.max(2, Math.ceil(len / 50));
-    const nx = (y0 - y1) / len, ny = (x1 - x0) / len;
-    const bow = (r() - 0.5) * Math.min(14, len * 0.01) * wob, ph = r() * TAU, pts = [];
-    for (let i = 0; i <= n; i++) {
-      const u = i / n, d = Math.sin(u * Math.PI) * (bow + Math.sin(u * TAU * 3 + ph) * 0.9 * wob);
-      pts.push([x0 + (x1 - x0) * u + nx * d, y0 + (y1 - y0) * u + ny * d]);
-    }
-    trace(g, pts);
-  }
-
-  // Straight edges through the points, each ruled by hand; closed unless asked not to be.
-  function poly(g, r, pts, close = true) {
-    for (let i = 0; i < pts.length - (close ? 0 : 1); i++) line(g, r, ...pts[i], ...pts[(i + 1) % pts.length], 0.6);
-  }
-
-  // A compass circle or arc of radius R about the origin, its radius wavering a little. A
-  // whole circle runs on a little past where it began, as a drawn one does.
-  function arc(g, r, R, a0 = 0, a1 = TAU, wob = 1) {
-    const end = a1 - a0 >= TAU - 1e-9 ? a1 + 0.05 + r() * 0.25 : a1;
-    const n = Math.max(16, Math.ceil(R * (end - a0) / 24)), ph = r() * TAU, amp = Math.min(2.5, 0.5 + R * 0.004) * wob, pts = [];
-    for (let i = 0; i <= n; i++) {
-      const a = a0 + (end - a0) * i / n, rr = R + Math.sin(a * 2 + ph) * amp;
-      pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
-    }
-    trace(g, pts);
-  }
-
-  // ---------- What's drawn: each about the origin, with its own randomness `r` ----------
-
-  // A centre mark or crosshair: a cross, often ringed, now and then a dot.
-  function mark(g, r, s) {
-    pen(g, 1.4 + r() * 0.8, 0.5 + r() * 0.4);
-    line(g, r, -s, 0, s, 0, 0.3);
-    line(g, r, 0, -s, 0, s, 0.3);
-    if (r() < 0.6) arc(g, r, s * 0.55, 0, TAU, 0.3);
-    if (r() < 0.3) { g.beginPath(); g.arc(0, 0, s * 0.18, 0, TAU); g.fill(); }
-  }
-
-  // A dial: rings, often a chapter of ticks, a few radii and a centre mark; now and then a
-  // pair of opposite wedges shaded in, like a pendulum's sweep.
-  function dial(g, r, R) {
-    pen(g, 2.4 + r() * 1.6, 0.55 + r() * 0.35);
-    arc(g, r, R);
-    for (let j = 1, n = Math.floor(r() * 3); j <= n; j++) {
-      pen(g, 1.4 + r() * 1.2, 0.4 + r() * 0.4);
-      arc(g, r, R * (1 - j * (0.05 + r() * 0.09)));
-    }
-    if (r() < 0.65) {
-      const n = [12, 24, 36, 60, 72][Math.floor(r() * 5)];
-      for (let i = 0; i < n; i++) {
-        const a = i / n * TAU, big = i % (n / 12) === 0, r0 = R * (big ? 0.86 : 0.92);
-        pen(g, big ? 2.2 : 1.3, 0.6);
-        line(g, r, Math.cos(a) * r0, Math.sin(a) * r0, Math.cos(a) * R * 0.98, Math.sin(a) * R * 0.98, 0.3);
-      }
-    }
-    for (let i = 0, n = Math.floor(r() * 3); i < n; i++) {
-      const a = r() * TAU, len = R * (0.6 + r() * 0.5);
-      pen(g, 1.4 + r(), 0.5 + r() * 0.3);
-      line(g, r, 0, 0, Math.cos(a) * len, Math.sin(a) * len);
-    }
-    if (r() < 0.35) {
-      const a = r() * TAU, w = 0.25 + r() * 0.3;
-      g.globalAlpha = 0.18 + r() * 0.2;
-      g.beginPath();
-      g.moveTo(0, 0); g.arc(0, 0, R * 0.8, a - w, a + w); g.closePath();
-      g.moveTo(0, 0); g.arc(0, 0, R * 0.8, a + Math.PI - w, a + Math.PI + w); g.closePath();
-      g.fill();
-    }
-    mark(g, r, 10 + R * 0.03);
-  }
-
-  // A gear and one or two more meshing with it (design px about the first's centre), and
-  // how far they reach.
-  function layout(r, pitch, teeth) {
-    const gears = [{ x: 0, y: 0, G: Mech.gearDims(pitch, teeth) }];
-    for (let j = 1, n = 1 + Math.floor(r() * 3); j < n; j++) {
-      const from = gears[j - 1], G = Mech.gearDims(pitch, 10 + Math.floor(r() * 30)), a = r() * TAU, d = from.G.rp + G.rp;
-      gears.push({ x: from.x + Math.cos(a) * d, y: from.y + Math.sin(a) * d, G });
-    }
-    return { gears, R: Math.max(...gears.map(q => Math.hypot(q.x, q.y) + q.G.r)) };
-  }
-
-  // The gears in outline, their pitch circles often dashed in and their centres marked.
-  function train(g, r, gears) {
-    for (const { x, y, G } of gears) {
-      g.save();
-      g.translate(x, y);
-      mark(g, r, 8 + G.r * 0.05);
-      g.rotate(r() * TAU);
-      const spokes = r() < 0.6 ? 3 + Math.floor(r() * 4) : 0;
-      pen(g, 2 + r() * 1.6, 0.5 + r() * 0.4);
-      g.stroke(Mech.gearPath(G, { spokes, curved: r() < 0.5, holes: spokes ? 0 : 3 + Math.floor(r() * 4) }));
-      if (r() < 0.6) {
-        pen(g, 1.3, 0.4);
-        g.setLineDash([12, 9]);
-        g.beginPath(); g.arc(0, 0, G.rp, 0, TAU); g.stroke();
-        g.setLineDash([]);
-      }
-      g.restore();
-    }
-  }
-
-  // A construction: squares nested, each turned to sit corner-in inside the last; a chain
-  // of diamonds; zig-zags or square steps; or a polygon in its circle, with its diagonals.
-  function figure(g, r, R) {
-    const kind = Math.floor(r() * 4);
-    g.rotate(r() < 0.5 ? 0 : r() * TAU);
-    pen(g, 1.8 + r() * 1.6, 0.45 + r() * 0.4);
-    if (kind === 0) {
-      for (let j = 0, n = 3 + Math.floor(r() * 3), s = R; j < n; j++, s *= Math.SQRT1_2) {
-        const a = Math.PI / 4 * (j + 1);
-        poly(g, r, [0, 1, 2, 3].map(i => [Math.cos(a + i * Math.PI / 2) * s, Math.sin(a + i * Math.PI / 2) * s]));
-      }
-    } else if (kind === 1) {
-      const n = 3 + Math.floor(r() * 5), d = R * 2 / n;
-      for (let i = 0; i < n; i++) {
-        const x = -R + d * (i + 0.5);
-        poly(g, r, [[x - d / 2, 0], [x, -d / 2], [x + d / 2, 0], [x, d / 2]]);
-      }
-    } else if (kind === 2) {
-      const n = 4 + Math.floor(r() * 6), d = R * 2 / n, steps = r() < 0.5, pts = [];
-      for (let i = 0; i <= n; i++) {
-        const x = -R + d * i, y = (i % 2 ? -1 : 1) * d / 2;
-        if (steps && i) pts.push([x, pts[pts.length - 1][1]]);
-        pts.push([x, y]);
-      }
-      poly(g, r, pts, false);
-    } else {
-      const n = 3 + Math.floor(r() * 4), pts = Array.from({ length: n }, (_, i) => [Math.cos(i / n * TAU) * R, Math.sin(i / n * TAU) * R]);
-      arc(g, r, R);
-      poly(g, r, pts);
-      pen(g, 1.2, 0.35);
-      for (let i = 0; i < n; i++) for (let j = i + 2; j < n - (i === 0 ? 1 : 0); j++) line(g, r, ...pts[i], ...pts[j], 0.5);
-    }
-  }
-
-  // A rule: a long strip with ticks along one edge, longer every fifth and tenth.
-  function ruler(g, r, L, a) {
-    g.rotate(a);
-    const w = 22 + r() * 18, step = 9 + r() * 7;
-    pen(g, 1.8 + r(), 0.5 + r() * 0.3);
-    poly(g, r, [[-L / 2, -w / 2], [L / 2, -w / 2], [L / 2, w / 2], [-L / 2, w / 2]]);
-    pen(g, 1.2, 0.5);
-    for (let i = 0, x = -L / 2 + step; x < L / 2; i++, x += step) {
-      line(g, r, x, -w / 2, x, -w / 2 + w * (i % 10 === 9 ? 0.7 : i % 5 === 4 ? 0.5 : 0.3), 0.2);
-    }
-  }
-
-  // Shading: parallel strokes across a disc or a wedge of one.
-  function hatch(g, r, R) {
-    const a = r() * Math.PI, gap = 6 + r() * 6, a0 = r() * TAU, w = 0.5 + r() * 1.5;
-    g.save();
+  function lineT(g, x0, y0, x1, y1, a, b) {
+    if (b <= a) return;
     g.beginPath();
-    if (r() < 0.5) { g.moveTo(0, 0); g.arc(0, 0, R, a0, a0 + w); g.closePath(); } else g.arc(0, 0, R, 0, TAU);
-    g.clip();
-    g.rotate(a);
-    pen(g, 1.2 + r() * 0.8, 0.3 + r() * 0.3);
-    for (let y = -R; y <= R; y += gap) line(g, r, -R, y, R, y, 0.3);
-    g.restore();
+    g.moveTo(x0 + (x1 - x0) * a, y0 + (y1 - y0) * a);
+    g.lineTo(x0 + (x1 - x0) * b, y0 + (y1 - y0) * b);
+    g.stroke();
   }
 
-  // Graphite scribbled into a dark mass: hundreds of short looping strokes, thickest in
-  // the middle and thinning out raggedly.
-  function scribble(g, r, R) {
-    for (let i = 0, n = Math.round(400 + R * 2.2); i < n; i++) {
-      const d = R * Math.sqrt(r()) * (0.6 + 0.4 * r()), a = r() * TAU;
-      let x = Math.cos(a) * d, y = Math.sin(a) * d * 0.75, h = r() * TAU;
-      pen(g, 1.2 + r() * 1.4, (0.08 + 0.3 * (1 - d / R)) * (0.6 + 0.4 * r()));
-      g.beginPath();
-      g.moveTo(x, y);
-      for (let j = 0; j < 7; j++) { h += (r() - 0.5) * 2.4; x += Math.cos(h) * 16; y += Math.sin(h) * 16; g.lineTo(x, y); }
-      g.stroke();
-    }
-  }
-
-  // ---------- A sheet ----------
-
-  // The things on sheet `seed`, each { x, y, R (how far it reaches), draw(g) }. Each keeps
-  // its own randomness, so it draws the same every time it's drawn.
-  function things(seed) {
-    const r = rng(seed), { w: W, h: H } = SHEET, out = [];
-    const add = (R, draw, x = r() * W, y = r() * H) => {
-      const s = Math.floor(r() * 2 ** 31);
-      out.push({ x, y, R, draw: g => draw(g, rng(s)) });
-    };
-    // Construction lines right across the sheet: mostly level or upright, a few slanting,
-    // some ruled twice, close together.
-    for (let i = 0, n = 8 + Math.floor(r() * 5); i < n; i++) {
-      const kind = r(), gaps = r() < 0.3 ? [0, 7 + r() * 9] : [0];
-      const rule = (x0, y0, x1, y1) => (g, q) => {
-        pen(g, 1.6 + q() * 1.4, 0.3 + q() * 0.35);
-        const len = Math.hypot(x1 - x0, y1 - y0), nx = (y0 - y1) / len, ny = (x1 - x0) / len;
-        for (const d of gaps) line(g, q, x0 + nx * d, y0 + ny * d, x1 + nx * d, y1 + ny * d, 1.5);
-      };
-      if (kind < 0.4) add(W / 2 + 20, rule(-W / 2, 0, W / 2, 0), W / 2, r() * H);
-      else if (kind < 0.8) add(H / 2 + 20, rule(0, -H / 2, 0, H / 2), r() * W, H / 2);
-      else {
-        const a = (r() - 0.5) * 1.2 + (r() < 0.5 ? 0 : Math.PI / 2), L = 900 + r() * 1300, c = Math.cos(a) * L / 2, s = Math.sin(a) * L / 2;
-        add(L / 2 + 20, rule(-c, -s, c, s));
+  // Through the points (and back to the first, if closed).
+  function polyT(g, pts, closed, a, b) {
+    if (b <= a) return;
+    const Q = closed ? [...pts, pts[0]] : pts, lens = [];
+    let L = 0;
+    for (let i = 1; i < Q.length; i++) { lens.push(Math.hypot(Q[i][0] - Q[i - 1][0], Q[i][1] - Q[i - 1][1])); L += lens[i - 1]; }
+    const A = a * L, B = b * L;
+    let s = 0, started = false;
+    g.beginPath();
+    for (let i = 1; i < Q.length; i++) {
+      const l = lens[i - 1], e = s + l, [x0, y0] = Q[i - 1], [x1, y1] = Q[i];
+      if (e > A && s < B && l > 0) {
+        const u0 = Math.max(0, (A - s) / l), u1 = Math.min(1, (B - s) / l);
+        if (!started) { g.moveTo(x0 + (x1 - x0) * u0, y0 + (y1 - y0) * u0); started = true; }
+        g.lineTo(x0 + (x1 - x0) * u1, y0 + (y1 - y0) * u1);
       }
+      s = e;
     }
-    // Dials and compass work, from small to most of the frame.
-    for (let i = 0, n = 4 + Math.floor(r() * 4); i < n; i++) {
-      const R = 120 + r() ** 1.5 * 620;
-      add(R * 1.12 + 10, (g, q) => dial(g, q, R)); // its radii run out to 1.1 R
-    }
-    // Gear trains.
-    for (let i = 0, n = 3 + Math.floor(r() * 3); i < n; i++) {
-      const lay = layout(rng(Math.floor(r() * 2 ** 31)), 16 + r() * 30, 14 + Math.floor(r() * 46));
-      add(lay.R + 30, (g, q) => train(g, q, lay.gears));
-    }
-    // Constructions.
-    for (let i = 0, n = 7 + Math.floor(r() * 5); i < n; i++) {
-      const R = 60 + r() * 260;
-      add(R * 1.5, (g, q) => figure(g, q, R));
-    }
-    // Rulers, mostly level or upright.
-    for (let i = 0, n = 2 + Math.floor(r() * 3); i < n; i++) {
-      const L = 400 + r() * 900, a = r() < 0.6 ? Math.floor(r() * 4) * Math.PI / 2 : r() * TAU;
-      add(L / 2 + 40, (g, q) => ruler(g, q, L, a));
-    }
-    // Small holes and pivots, some filled; and crosshairs.
-    for (let i = 0, n = 30 + Math.floor(r() * 25); i < n; i++) {
-      const s = 4 + r() ** 2 * 26;
-      add(s + 6, (g, q) => {
-        pen(g, 1.4 + q(), 0.4 + q() * 0.4);
-        arc(g, q, s, 0, TAU, 0.4);
-        if (q() < 0.25) { g.beginPath(); g.arc(0, 0, s * 0.5, 0, TAU); g.fill(); }
-      });
-    }
-    for (let i = 0, n = 16 + Math.floor(r() * 14); i < n; i++) {
-      const s = 8 + r() * 22;
-      add(s + 6, (g, q) => mark(g, q, s));
-    }
-    // Shading.
-    for (let i = 0, n = 3 + Math.floor(r() * 3); i < n; i++) {
-      const R = 60 + r() * 160;
-      add(R + 6, (g, q) => hatch(g, q, R));
-    }
-    // Fine upright streaks, as where the opening's frames double up.
-    if (r() < 0.7) {
-      const x0 = r() * W;
-      for (let i = 0; i < 26; i++) {
-        const L = 60 + r() ** 2 * 380;
-        add(L / 2 + 6, (g, q) => { pen(g, 1 + q() * 1.2, 0.15 + q() * 0.3); line(g, q, 0, -L / 2, 0, L / 2, 0.4); }, x0 + (r() - 0.5) * 700, r() * H);
-      }
-    }
-    // Graphite scribbled into a dark mass, over the rest.
-    for (let i = 0, n = 1 + Math.floor(r() * 2); i < n; i++) {
-      const R = 140 + r() * 200;
-      add(R + 130, (g, q) => scribble(g, q, R));
-    }
-    return out;
+    if (started) g.stroke();
   }
 
-  // Draw `fn` (in design px about the origin) at x, y on the sheet, and again a sheet's
-  // width or height away wherever its reach R crosses an edge, so the sheet tiles.
-  function wrapped(g, x, y, R, fn) {
-    const { w: W, h: H } = SHEET;
-    for (const dx of [-W, 0, W]) {
-      for (const dy of [-H, 0, H]) {
-        const X = x + dx, Y = y + dy;
-        if (X + R < 0 || X - R > W || Y + R < 0 || Y - R > H) continue;
-        g.save();
-        g.translate(X, Y);
-        fn();
-        g.restore();
-      }
+  // A ring of n ticks from r0 out to r1, turned by `rot`, every `major`-th reaching further
+  // in. Only the ticks whose place round the ring lies from `a` to `b` show: a repeater,
+  // revealed.
+  function ticksT(g, n, r0, r1, rot, a, b, major = 0) {
+    if (b <= a) return;
+    g.beginPath();
+    for (let i = 0; i < n; i++) {
+      const u = i / n;
+      if (u < a || u >= b) continue;
+      const c = Math.cos(rot + u * TAU), s = Math.sin(rot + u * TAU), ri = major && i % major === 0 ? r0 - (r1 - r0) * 0.8 : r0;
+      g.moveTo(c * ri, s * ri);
+      g.lineTo(c * r1, s * r1);
     }
+    g.stroke();
   }
 
-  // The paper's grime: broad soft blotches and a finer mottle. It tiles, so it's stretched
-  // over the sheet whole.
-  function grime(seed) {
-    const n = 192, P = 4, c = canvas(n, n), g = c.getContext('2d'), img = g.createImageData(n, n);
-    for (let y = 0, i = 0; y < n; y++) {
-      for (let x = 0; x < n; x++, i += 4) {
-        const u = x / n * P, v = y / n * P;
-        const broad = pfbm2(u, v, P, seed, 3), fine = pfbm2(u * 4, v * 4, P * 4, seed + 5, 3);
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = 255 * (1 - 0.15 * smooth(0.4, 0.75, broad) - 0.06 * fine);
-        img.data[i + 3] = 255;
-      }
+  // A polyline whose x only ever grows, drawn only where it lies from x = xa to xb.
+  function clipX(g, pts, xa, xb) {
+    if (xb <= xa) return;
+    let started = false;
+    g.beginPath();
+    for (let i = 1; i < pts.length; i++) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+      if (x1 <= xa || x0 >= xb) continue;
+      const u0 = x0 < xa ? (xa - x0) / (x1 - x0) : 0, u1 = x1 > xb ? (xb - x0) / (x1 - x0) : 1;
+      if (!started) { g.moveTo(x0 + (x1 - x0) * u0, y0 + (y1 - y0) * u0); started = true; }
+      g.lineTo(x0 + (x1 - x0) * u1, y0 + (y1 - y0) * u1);
     }
-    g.putImageData(img, 0, 0);
-    return c;
+    if (started) g.stroke();
   }
 
-  // Sheet `seed` at k px per design px (a whole number of px across and down, so it tiles).
-  function sheet(seed, k) {
-    const c = canvas(Math.round(SHEET.w * k), Math.round(SHEET.h * k)), g = c.getContext('2d');
-    g.fillStyle = '#fff';
-    g.fillRect(0, 0, c.width, c.height);
-    g.globalCompositeOperation = 'multiply';
-    g.drawImage(grime(seed), 0, 0, c.width, c.height);
-    g.globalCompositeOperation = 'source-over';
-    g.setTransform(k, 0, 0, k, 0, 0);
-    g.strokeStyle = g.fillStyle = `rgb(${INK})`;
-    g.lineCap = g.lineJoin = 'round';
-    for (const it of things(seed)) wrapped(g, it.x, it.y, it.R, () => it.draw(g));
-    return c;
+  // How big something that pops is: up from nothing with a little overshoot as `u` goes 0
+  // to 1, and back down to nothing as `v` does.
+  const pop = (u, v) => ease.tick(u) * (1 - ease.inOut(clamp(v)));
+
+  // A small ring (a pivot, a corner, a bob) at x, y, popping in and out.
+  function node(g, x, y, rad, u, v, fill = false) {
+    const k = pop(u, v);
+    if (k <= 0.001) return;
+    g.beginPath();
+    g.arc(x, y, rad * k, 0, TAU);
+    if (fill) g.fill(); else g.stroke();
   }
 
-  class Sheets {
-    constructor() { this.cam = { x: 0, y: 0 }; this.tiles = null; this.px = 0; this.k = 1; this.pats = []; }
+  // A crosshair of arm s, popping in and out, ringed if asked.
+  function mark(g, s, u, v, ring = false) {
+    const k = pop(u, v) * s;
+    if (k <= 0.01) return;
+    g.beginPath();
+    g.moveTo(-k, 0); g.lineTo(k, 0);
+    g.moveTo(0, -k); g.lineTo(0, k);
+    if (ring) { g.moveTo(k * 0.55, 0); g.arc(0, 0, k * 0.55, 0, TAU); }
+    g.stroke();
+  }
 
-    // Bake the sheets at about half the frame's resolution (they're seen soft, far
-    // behind), and again only when that changes. Their width is a multiple of 8 px, so
-    // their height (5/8 of it) is a whole number too.
+  // A wedge shaded with a fan of lines from the middle, centred on angle `a`, `w` wide,
+  // from r0 out to r1, drawn outward from `lo` to `hi`, with its rim once it's out.
+  function fan(g, a, w, r0, r1, lo, hi) {
+    if (hi <= lo) return;
+    const ra = r0 + (r1 - r0) * lo, rb = r0 + (r1 - r0) * hi;
+    g.beginPath();
+    for (let i = 0; i <= 5; i++) {
+      const c = Math.cos(a - w / 2 + w * i / 5), s = Math.sin(a - w / 2 + w * i / 5);
+      g.moveTo(c * ra, s * ra);
+      g.lineTo(c * rb, s * rb);
+    }
+    g.stroke();
+    if (hi >= 1) { g.beginPath(); g.arc(0, 0, r1, a - w / 2, a + w / 2); g.stroke(); }
+  }
+
+  // ---------- The figures ----------
+  // Each kind: how often it's picked (`w`), how big it is (`R`, design px), how much room it
+  // takes when the figures are spaced (`room`, a fraction of R), what it's made of (`make`,
+  // from its own randomness) and how it's drawn about its own middle at time t, drawn `on`
+  // of the way and erased `off` of the way.
+  const KINDS = {
+    // A dial: its rim; a ring of ticks ticking round a tick at a time, like the clocks; an
+    // inner ring; often a ring of fewer ticks turning the other way; often a hand sweeping
+    // round; and a centre mark.
+    dial: {
+      w: 3, R: r => 120 + r() ** 1.6 * 260,
+      make: r => {
+        const ticks = [60, 72, 120][Math.floor(r() * 3)];
+        return {
+          a0: r() * TAU, ticks, major: ticks / 12, every: 1 + r() * 2.5, ph: r(), dir: r() < 0.6 ? 1 : -1,
+          inner: 0.6 + r() * 0.18, ring: r() < 0.6 ? [12, 24, 36][Math.floor(r() * 3)] : 0,
+          turn: (r() < 0.5 ? -1 : 1) * TAU / (70 + r() * 110),
+          hand: r() < 0.7 ? (r() < 0.5 ? -1 : 1) * TAU / (25 + r() * 50) : 0,
+        };
+      },
+      draw(g, f, t, on, off) {
+        const p = f.p, R = f.R, q = i => [stagger(off, i, 5), stagger(on, i, 5)];
+        g.lineWidth = 2.4;
+        arcT(g, R, p.a0, TAU, ...q(0));
+        g.lineWidth = 1.5;
+        g.globalAlpha = f.w * 0.85;
+        ticksT(g, p.ticks, R * 0.93, R * 0.985, p.a0 + stepped(t, p.every, 0.4, p.dir * TAU / p.ticks, p.ph), ...q(1), p.major);
+        g.lineWidth = 1.7;
+        g.globalAlpha = f.w * 0.7;
+        arcT(g, R * p.inner, p.a0 + 2, -TAU, ...q(2));
+        if (p.ring) ticksT(g, p.ring, R * p.inner * 0.9, R * p.inner * 0.97, p.turn * t, ...q(3));
+        g.globalAlpha = f.w * 0.8;
+        if (p.hand) {
+          const a = p.a0 + p.hand * t;
+          lineT(g, 0, 0, Math.cos(a) * R * 0.86, Math.sin(a) * R * 0.86, ...q(4));
+        }
+        g.globalAlpha = f.w;
+        mark(g, 9 + R * 0.04, on, off, true);
+      },
+    },
+
+    // Dashed orbits: a dashed circle, often another inside it, their dashes marching round
+    // opposite ways, and a segment travelling round the outer one with a dot at its head.
+    orbit: {
+      w: 2, R: r => 80 + r() ** 1.4 * 210,
+      make: r => ({
+        a0: r() * TAU, dash: [5 + r() * 9, 7 + r() * 12], march: (r() < 0.5 ? -1 : 1) * (6 + r() * 14),
+        inner: r() < 0.65 ? 0.55 + r() * 0.2 : 0, seg: 0.07 + r() * 0.1, speed: (r() < 0.5 ? -1 : 1) * TAU / (9 + r() * 14),
+      }),
+      draw(g, f, t, on, off) {
+        const p = f.p, R = f.R, q = i => [stagger(off, i, 3), stagger(on, i, 3)];
+        g.setLineDash(p.dash);
+        g.lineWidth = 1.7;
+        g.lineDashOffset = -t * p.march;
+        arcT(g, R, p.a0, TAU, ...q(0));
+        if (p.inner) {
+          g.lineDashOffset = t * p.march;
+          g.globalAlpha = f.w * 0.7;
+          arcT(g, R * p.inner, p.a0, -TAU, ...q(1));
+        }
+        g.setLineDash([]);
+        const [a, b] = q(2), head = p.a0 + p.speed * t, len = p.seg * TAU * Math.sign(p.speed);
+        if (b > a) {
+          g.globalAlpha = f.w * (b - a);
+          g.lineWidth = 2.6;
+          g.beginPath();
+          g.arc(0, 0, R, head - len, head, len < 0);
+          g.stroke();
+          node(g, Math.cos(head) * R, Math.sin(head) * R, 5, 1, 0, true);
+        }
+        g.globalAlpha = f.w;
+        mark(g, 8 + R * 0.04, on, off);
+      },
+    },
+
+    // A compass construction: a circle; a polygon in it, turning slowly round; its
+    // diagonals (a triangle's radii); and a small ring at each corner.
+    construction: {
+      w: 2.5, R: r => 70 + r() ** 1.3 * 180,
+      make: r => ({ n: 3 + Math.floor(r() * 4), a0: r() * TAU, spin: (r() < 0.5 ? -1 : 1) * TAU / (50 + r() * 110), lines: r() < 0.75 }),
+      draw(g, f, t, on, off) {
+        const p = f.p, R = f.R, q = i => [stagger(off, i, 4, 0.5), stagger(on, i, 4, 0.5)];
+        g.lineWidth = 2;
+        arcT(g, R, p.a0, TAU, ...q(0));
+        const rot = p.a0 + p.spin * t, pts = Array.from({ length: p.n }, (_, i) => [Math.cos(rot + i / p.n * TAU) * R, Math.sin(rot + i / p.n * TAU) * R]);
+        g.lineWidth = 1.7;
+        polyT(g, pts, true, ...q(1));
+        if (p.lines) {
+          const [a, b] = q(2);
+          g.lineWidth = 1.2;
+          g.globalAlpha = f.w * 0.6;
+          if (p.n === 3) for (const [x, y] of pts) lineT(g, 0, 0, x, y, a, b);
+          else for (let i = 0; i < p.n; i++) for (let j = i + 2; j < p.n - (i === 0 ? 1 : 0); j++) lineT(g, ...pts[i], ...pts[j], a, b);
+          g.globalAlpha = f.w;
+        }
+        const [a, b] = q(3);
+        g.lineWidth = 1.4;
+        for (const [x, y] of pts) node(g, x, y, 6, b, a);
+      },
+    },
+
+    // Nested squares, each sitting corner-in inside the last and swinging to and fro on its
+    // own, so they slip out of line and back.
+    squares: {
+      w: 1.3, R: r => 70 + r() * 135,
+      make: r => ({ n: 3 + Math.floor(r() * 3), a0: r() * TAU, amp: 0.12 + r() * 0.22, per: 12 + r() * 16 }),
+      draw(g, f, t, on, off) {
+        const p = f.p;
+        for (let j = 0, s = f.R; j < p.n; j++, s *= Math.SQRT1_2) {
+          const a = p.a0 + Math.PI / 4 * j + p.amp * Math.sin(TAU * t / (p.per * (1 + 0.37 * j)) + j * 1.3);
+          g.lineWidth = 1.9 - 0.2 * j;
+          g.globalAlpha = f.w * (1 - 0.12 * j);
+          polyT(g, [0, 1, 2, 3].map(i => [Math.cos(a + i * Math.PI / 2) * s, Math.sin(a + i * Math.PI / 2) * s]), true,
+            stagger(off, j, p.n, 0.5), stagger(on, j, p.n, 0.5));
+        }
+        g.globalAlpha = f.w;
+      },
+    },
+
+    // A pendulum: its swing marked out in degrees, the rod and bob swinging, and a pair of
+    // opposite wedges shaded in fans, swinging with it like a balance's sweep.
+    pendulum: {
+      w: 1.5, R: r => 110 + r() * 150,
+      make: r => ({ amp: 0.3 + r() * 0.3, per: 2.6 + r() * 3.2, ph: r() * TAU, wedge: 0.2 + r() * 0.2, twin: r() < 0.6, down: Math.PI / 2 + (r() - 0.5) * 0.4 }),
+      draw(g, f, t, on, off) {
+        const p = f.p, R = f.R, q = i => [stagger(off, i, 4), stagger(on, i, 4)];
+        const th = p.down + p.amp * Math.sin(TAU * t / p.per + p.ph), span = p.amp + 0.15;
+        let [a, b] = q(0);
+        g.lineWidth = 1.5;
+        arcT(g, R * 0.92, p.down - span, span * 2, a, b);
+        const n = Math.round(span * 2 / (Math.PI / 36)); // a tick every 5 degrees
+        g.globalAlpha = f.w * 0.7;
+        g.beginPath();
+        for (let i = 0; i <= n; i++) {
+          const u = i / n;
+          if (u < a || u > b) continue;
+          const ang = p.down - span + span * 2 * u, r0 = R * (i % 3 ? 0.89 : 0.85);
+          g.moveTo(Math.cos(ang) * r0, Math.sin(ang) * r0);
+          g.lineTo(Math.cos(ang) * R * 0.92, Math.sin(ang) * R * 0.92);
+        }
+        g.stroke();
+        g.globalAlpha = f.w;
+        [a, b] = q(1);
+        g.lineWidth = 1.8;
+        lineT(g, 0, 0, Math.cos(th) * R * 0.8, Math.sin(th) * R * 0.8, a, b);
+        node(g, Math.cos(th) * R * 0.8, Math.sin(th) * R * 0.8, R * 0.06, b, a);
+        [a, b] = q(2);
+        g.lineWidth = 1.1;
+        g.globalAlpha = f.w * 0.5;
+        fan(g, th, p.wedge, R * 0.12, R * 0.62, a, b);
+        if (p.twin) fan(g, th + Math.PI, p.wedge, R * 0.12, R * 0.62, a, b);
+        g.globalAlpha = f.w;
+        [a, b] = q(3);
+        g.lineWidth = 1.4;
+        node(g, 0, 0, 7, b, a);
+      },
+    },
+
+    // A rule: a long strip with ticks along one edge, longer every fifth and tenth, sliding
+    // along it, and an index moving to and fro beneath.
+    ruler: {
+      w: 1.5, R: r => 150 + r() * 270, room: 0.55,
+      make: r => ({
+        rot: r() < 0.65 ? Math.floor(r() * 2) * Math.PI / 2 : (r() - 0.5) * 1.6, wid: 22 + r() * 16, step: 10 + r() * 6,
+        slide: (r() < 0.5 ? -1 : 1) * (3 + r() * 9), per: 9 + r() * 12, ph: r() * TAU,
+      }),
+      draw(g, f, t, on, off) {
+        const p = f.p, L = f.R, w = p.wid, q = i => [stagger(off, i, 3), stagger(on, i, 3)];
+        g.rotate(p.rot);
+        g.lineWidth = 1.8;
+        polyT(g, [[-L, -w / 2], [L, -w / 2], [L, w / 2], [-L, w / 2]], true, ...q(0));
+        let [a, b] = q(1);
+        const shift = p.slide * t;
+        g.lineWidth = 1.3;
+        g.globalAlpha = f.w * 0.8;
+        g.beginPath();
+        for (let i = Math.ceil((-L - shift) / p.step); ; i++) {
+          const x = i * p.step + shift, u = (x + L) / (2 * L);
+          if (x > L) break;
+          if (u < a || u > b) continue;
+          g.moveTo(x, -w / 2);
+          g.lineTo(x, -w / 2 + w * (i % 10 === 0 ? 0.7 : i % 5 === 0 ? 0.5 : 0.3));
+        }
+        g.stroke();
+        [a, b] = q(2);
+        if (b > a) {
+          const x = L * 0.85 * Math.sin(TAU * t / p.per + p.ph);
+          g.globalAlpha = f.w * (b - a);
+          g.lineWidth = 1.4;
+          g.beginPath();
+          g.moveTo(x, w / 2 + 5); g.lineTo(x - 7, w / 2 + 17); g.lineTo(x + 7, w / 2 + 17); g.closePath();
+          g.stroke();
+        }
+        g.globalAlpha = f.w;
+      },
+    },
+
+    // A cluster of registration marks and crosshairs popping in one after another, each
+    // snapping round an eighth of a turn now and then, often linked by a dotted line.
+    marks: {
+      w: 1.3, R: r => 55 + r() * 100,
+      make: r => ({
+        pts: Array.from({ length: 3 + Math.floor(r() * 4) }, () => [r() * 2 - 1, r() * 2 - 1, 8 + r() * 13, r() < 0.5]),
+        every: 2.5 + r() * 4, ph: r(), link: r() < 0.6,
+      }),
+      draw(g, f, t, on, off) {
+        const p = f.p, R = f.R, n = p.pts.length;
+        if (p.link) {
+          g.setLineDash([3, 7]);
+          g.lineWidth = 1.1;
+          g.globalAlpha = f.w * 0.6;
+          polyT(g, p.pts.map(([x, y]) => [x * R, y * R]), false, stagger(off, 0, 2), stagger(on, 1, 2));
+          g.setLineDash([]);
+          g.globalAlpha = f.w;
+        }
+        const spin = stepped(t, p.every, 0.5, Math.PI / 4, p.ph);
+        g.lineWidth = 1.5;
+        p.pts.forEach(([x, y, s, ring], i) => {
+          g.save();
+          g.translate(x * R, y * R);
+          g.rotate(spin);
+          mark(g, s, stagger(on, i, n, 0.5), stagger(off, i, n, 0.5), ring);
+          g.restore();
+        });
+      },
+    },
+
+    // A worldline: a line drawn on from one end, branching as it goes, each branch curving
+    // away and running on beside it, a ring at each split; now and then a pulse of light
+    // runs along it.
+    worldline: {
+      w: 1.6, R: r => 235 + r() * 235, room: 0.6,
+      make: r => ({
+        tilt: (r() - 0.5) * 0.35, every: 4 + r() * 5, ph: r() * 10,
+        splits: Array.from({ length: 1 + Math.floor(r() * 3) }, () => ({
+          x: -0.75 + r() * 1.2, dy: (r() < 0.5 ? -1 : 1) * (0.1 + r() * 0.2), run: 0.15 + r() * 0.15,
+        })),
+      }),
+      draw(g, f, t, on, off) {
+        const p = f.p, R = f.R, xa = -R + 2 * R * off, xb = -R + 2 * R * on;
+        g.rotate(p.tilt);
+        g.lineWidth = 1.9;
+        lineT(g, -R, 0, R, 0, off, on);
+        g.lineWidth = 1.4;
+        for (const s of p.splits) {
+          const x0 = s.x * R, x1 = x0 + s.run * R, dy = s.dy * R, pts = [];
+          for (let i = 0; i <= 12; i++) { const u = i / 12; pts.push([x0 + (x1 - x0) * u, dy * u * u * (3 - 2 * u)]); }
+          pts.push([R, dy]);
+          g.globalAlpha = f.w * 0.75;
+          clipX(g, pts, xa, xb);
+          g.globalAlpha = f.w;
+          node(g, x0, 0, 5, (xb - x0) / 60, (xa - x0) / 60);
+        }
+        // The pulse, running from one end to the other.
+        const u = ((t + p.ph) / p.every) % 1, x = -R + 2 * R * u, lo = Math.max(x - 34, xa), hi = Math.min(x + 34, xb);
+        if (hi > lo) {
+          g.globalAlpha = Math.min(1, f.w * 1.6) * Math.sin(Math.PI * u);
+          g.lineWidth = 2.8;
+          lineT(g, lo, 0, hi, 0, 0, 1);
+          g.globalAlpha = f.w;
+        }
+      },
+    },
+  };
+  const NAMES = Object.keys(KINDS), TOTAL = NAMES.reduce((s, k) => s + KINDS[k].w, 0);
+
+  // A kind, by how often each is picked.
+  function pick(r) {
+    let u = r() * TOTAL;
+    for (const k of NAMES) if ((u -= KINDS[k].w) <= 0) return k;
+    return NAMES[0];
+  }
+
+  // ---------- Long construction lines, right across the frame ----------
+  // Drawn on from one end, sometimes ruled twice, often with small ticks along them.
+  function drawRule(g, f, on, off) {
+    const { x0, y0, x1, y1 } = f, len = Math.hypot(x1 - x0, y1 - y0), nx = (y0 - y1) / len, ny = (x1 - x0) / len;
+    g.lineWidth = 1.3;
+    lineT(g, x0, y0, x1, y1, off, on);
+    if (f.gap) lineT(g, x0 + nx * f.gap, y0 + ny * f.gap, x1 + nx * f.gap, y1 + ny * f.gap, off, on);
+    if (!f.tick) return;
+    g.beginPath();
+    for (let d = f.tick; d < len; d += f.tick) {
+      const u = d / len;
+      if (u < off || u > on) continue;
+      const x = x0 + (x1 - x0) * u, y = y0 + (y1 - y0) * u;
+      g.moveTo(x - nx * 7, y - ny * 7);
+      g.lineTo(x + nx * 7, y + ny * 7);
+    }
+    g.stroke();
+  }
+
+  // ---------- The field ----------
+  class Field {
+    // `random` makes the figures and where they go (seed it for repeatable stills).
+    constructor(random = Math.random) {
+      this.r = random;
+      this.cam = { x: 0, y: 0 };
+      this.figs = [];
+      this.rules = [];
+      this.next = null;     // when the next figure may come
+      this.retire = null;   // when the next one goes
+      this.nextRule = null;
+      this.rush = false;    // drawing a fresh set after a worldline shift
+      this.last = null;     // the kind drawn last: never drawn twice running
+      this.clear = null;    // the middle of the centrepiece, kept clear
+      this.layer = null;
+    }
+
+    // The layer: about RES px per design px whatever the screen, so the lines look the same
+    // on any (between 0.4 and 1 of the screen's own px).
     build(view) {
-      const px = 8 * Math.max(1, Math.round(SHEET.w * Math.min(0.5, view.S * 0.5) / 8));
-      if (this.tiles && px === this.px) return;
-      this.px = px;
-      this.k = px / SHEET.w;
-      this.tiles = SHEETS.map(s => sheet(s.seed, this.k));
-      this.pats = [];
+      this.res = clamp(RES / view.S, 0.4, 1);
+      this.layer = canvas(Math.ceil(view.W * this.res), Math.ceil(view.H * this.res));
     }
 
-    // `a`: how far the paper lifts the black (Lighten's opacity, 0 to 1).
+    // `focus`: the centrepiece's pool of negative space (design px: centre and radii). New
+    // figures keep out of the middle half of it.
+    keepClear(focus) { this.clear = { x: focus.x, y: focus.y, rx: focus.rx * 0.5, ry: focus.ry * 0.5 }; }
+
+    // How many figures (or lines) aren't being erased yet: as soon as one starts to erase
+    // itself, the next may start to draw itself on.
+    staying(list, t) { return list.reduce((n, f) => n + (t < f.dies ? 1 : 0), 0); }
+
+    update(t) {
+      const r = this.r;
+      if (this.next == null) this.boot(t);
+      this.figs = this.figs.filter(f => t < f.dies + f.outT);
+      this.rules = this.rules.filter(f => t < f.dies + f.outT);
+      // Every few seconds the figure that has been there longest (if it has been there a
+      // while) erases itself, so they come and go at a steady pace, never in a crowd...
+      if (t >= this.retire) {
+        let oldest = null;
+        for (const f of this.figs) if (f.dies > t && t - f.born > AGE && (!oldest || f.born < oldest.born)) oldest = f;
+        if (oldest) oldest.dies = t;
+        this.retire = t + 2 + r() * 2.5;
+      }
+      // ...and another draws itself on.
+      if (t >= this.next && this.staying(this.figs, t) < COUNT) {
+        this.figs.push(this.figure(t));
+        this.next = t + (this.rush ? 0.06 + r() * 0.08 : 0.3 + r() * 0.5);
+        if (this.staying(this.figs, t) >= COUNT) this.rush = false;
+      }
+      if (t >= this.nextRule && this.staying(this.rules, t) < RULES) {
+        this.rules.push(this.rule(t));
+        this.nextRule = t + (this.rush ? 0.4 : 5 + r() * 10);
+      }
+    }
+
+    // At the start: a full set already, drawn on over the last minute or so, a few still
+    // drawing themselves on.
+    boot(t) {
+      for (let i = 0; i < COUNT; i++) this.figs.push(this.figure(t, this.r() * 60));
+      for (let i = 0; i < RULES; i++) this.rules.push(this.rule(t, this.r()));
+      this.next = t;
+      this.retire = t + 2;
+      this.nextRule = t + 6;
+    }
+
+    // A new figure, drawn on `age` s ago. It stays until the field has it erase itself.
+    figure(t, age = 0) {
+      const r = this.r;
+      let kind = pick(r);
+      while (kind === this.last) kind = pick(r);
+      this.last = kind;
+      const k = KINDS[kind], R = k.R(r), room = R * (k.room || 1), seed = Math.floor(r() * 2 ** 31);
+      const at = this.spot(room, t), depth = -1.3 + r() * 0.8;
+      return {
+        kind, R, room, x: at.x, y: at.y, depth, seed,
+        w: 0.55 + 0.45 * (depth + 1.3) / 0.8, // the deeper, the fainter
+        drift: { ax: 10 + r() * 30, ay: 8 + r() * 24, px: 50 + r() * 70, py: 60 + r() * 80, ph: r() * TAU },
+        spin: (r() - 0.5) * 0.004, // how fast it turns as a whole (rad/s)
+        p: k.make(rng(seed)),
+        born: t - age, inT: this.rush ? 0.9 + r() * 0.7 : 2.5 + r() * 2.5, outT: 2 + r() * 2, dies: Infinity,
+      };
+    }
+
+    // Where a figure taking up `room` goes at time t: of 120 places tried, the one with
+    // the most room to spare, from the figures staying (allowing for theirs) and from the
+    // middle of the centrepiece. Figures already erasing themselves don't count, so a new
+    // one often draws itself on where an old one is going. It may hang off the edge of the
+    // frame, but not lie beyond.
+    spot(room, t) {
+      const r = this.r, c = this.clear;
+      let best = null, most = -Infinity;
+      for (let i = 0; i < 120; i++) {
+        const x = -130 + r() * 2820, y = -90 + r() * 1620;
+        let spare = Infinity;
+        for (const f of this.figs) if (t < f.dies) spare = Math.min(spare, Math.hypot(x - f.x, y - f.y) - room - f.room);
+        if (c) spare = Math.min(spare, (Math.hypot((x - c.x) / c.rx, (y - c.y) / c.ry) - 1) * Math.min(c.rx, c.ry) - room * 0.5);
+        if (spare > most) { most = spare; best = { x, y }; }
+      }
+      return best;
+    }
+
+    // A new long construction line, `age` (0 to 1) of the way through its life: level,
+    // upright or slanting; a level or upright one as far as it can be from the others
+    // running its way.
+    rule(t, age = 0) {
+      const r = this.r, k = r(), ax = k < 0.4 ? 'h' : k < 0.8 ? 'v' : 's';
+      let pos = 0, x0, y0, x1, y1;
+      if (ax !== 's') {
+        let most = -1;
+        for (let i = 0; i < 10; i++) {
+          const c = ax === 'h' ? 60 + r() * 1320 : 60 + r() * 2440;
+          let spare = 1e9;
+          for (const o of this.rules) if (o.ax === ax) spare = Math.min(spare, Math.abs(o.pos - c));
+          if (spare > most) { most = spare; pos = c; }
+        }
+      }
+      if (ax === 'h') [x0, y0, x1, y1] = [-80, pos, 2640, pos];
+      else if (ax === 'v') [x0, y0, x1, y1] = [pos, -80, pos, 1520];
+      else {
+        const a = (r() < 0.5 ? 1 : -1) * (0.25 + r() * 0.6), cx = 400 + r() * 1760, cy = 200 + r() * 1040;
+        [x0, y0, x1, y1] = [cx - Math.cos(a) * 1700, cy - Math.sin(a) * 1700, cx + Math.cos(a) * 1700, cy + Math.sin(a) * 1700];
+      }
+      if (r() < 0.5) [x0, y0, x1, y1] = [x1, y1, x0, y0]; // drawn on from either end
+      return {
+        x0, y0, x1, y1, ax, pos, depth: -1.1 + r() * 0.4, w: 0.4 + r() * 0.25,
+        gap: r() < 0.3 ? 8 + r() * 8 : 0, tick: r() < 0.5 ? 120 + r() * 160 : 0,
+        ...lifetime(t, age, 40 + r() * 50, this.rush ? 1.2 : 3 + r() * 3, 2.5 + r() * 2),
+      };
+    }
+
+    // A worldline shift: everything erases itself at once, quickly, and a fresh set draws
+    // itself on, quickly, one after another.
+    shift(t) {
+      const r = this.r;
+      for (const f of [...this.figs, ...this.rules]) {
+        // Those not erasing yet start within the next 0.4 s; those erasing already hurry on
+        // from where they've got to.
+        const outT = 0.5 + r() * 0.4;
+        f.dies = f.dies > t ? t + r() * 0.4 : t - clamp((t - f.dies) / f.outT) * outT;
+        f.outT = outT;
+      }
+      this.rush = true;
+      this.next = t + 0.8;
+      this.nextRule = t + 1.2;
+    }
+
+    // Where figure f is at time t (design px): home, drifting its own slow way, and moved
+    // with the cursor by its own depth (they're deep, so they drift with it).
+    where(f, t) {
+      const d = f.drift;
+      return {
+        x: f.x + d.ax * Math.sin(TAU * t / d.px + d.ph) - this.cam.x * P * f.depth,
+        y: f.y + d.ay * Math.cos(TAU * t / d.py + d.ph * 1.7) - this.cam.y * P * f.depth * 0.7,
+      };
+    }
+
+    // `a`: how bright the lines are (Screen's opacity, 0 to 1).
     draw(ctx, view, t, a) {
-      if (!this.tiles || a <= 0) return;
+      if (!this.layer || a <= 0) return;
+      const g = this.layer.getContext('2d'), k = this.res, s = view.S * k;
+      const X = x => (view.ox + x * view.S) * k, Y = y => (view.oy + y * view.S) * k;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.clearRect(0, 0, this.layer.width, this.layer.height);
+      g.strokeStyle = g.fillStyle = `rgb(${LINE})`;
+      g.lineCap = g.lineJoin = 'round';
+      for (const f of this.rules) {
+        const [on, off] = phase(f, t);
+        if (on <= 0 || off >= 1) continue;
+        g.setTransform(s, 0, 0, s, X(-this.cam.x * P * f.depth), Y(-this.cam.y * P * f.depth * 0.7));
+        g.globalAlpha = f.w;
+        drawRule(g, f, on, off);
+      }
+      for (const f of this.figs) {
+        const [on, off] = phase(f, t);
+        if (on <= 0 || off >= 1) continue;
+        const at = this.where(f, t);
+        g.setTransform(s, 0, 0, s, X(at.x), Y(at.y));
+        g.rotate(f.spin * (t - f.born));
+        g.globalAlpha = f.w;
+        KINDS[f.kind].draw(g, f, t, on, off);
+      }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      // The paper: the black lifted a little toward the scene's warm light.
-      ctx.globalCompositeOperation = 'lighten';
+      ctx.globalCompositeOperation = 'screen';
       ctx.globalAlpha = Math.min(1, a);
-      ctx.fillStyle = `rgb(${PAPER})`;
-      ctx.fillRect(0, 0, view.W, view.H);
-      // The drawings on it: each sheet multiplied in as far as it has faded in, turned and
-      // zoomed about the middle of the frame.
-      ctx.globalCompositeOperation = 'multiply';
-      const cx = view.ox + 1280 * view.S, cy = view.oy + 720 * view.S;
-      fades(t).forEach((f, i) => {
-        if (f < 0.004) return;
-        const p = place(i, t, this.cam), pat = this.pats[i] || (this.pats[i] = ctx.createPattern(this.tiles[i], 'repeat'));
-        pat.setTransform(new DOMMatrix().translate(cx, cy).rotate(p.turn * 180 / Math.PI)
-          .scale(view.S * p.zoom).translate(-p.x, -p.y).scale(1 / this.k));
-        ctx.globalAlpha = f;
-        ctx.fillStyle = pat;
-        ctx.fillRect(0, 0, view.W, view.H);
-      });
+      ctx.drawImage(this.layer, 0, 0, view.W, view.H);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     }
   }
 
-  return { Sheets, SHEET, SHEETS, FADE, fades, place };
+  return { Field, KINDS, COUNT, RULES, stagger, phase };
 })();

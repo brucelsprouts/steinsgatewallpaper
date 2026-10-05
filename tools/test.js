@@ -578,58 +578,116 @@ test('rig: at its strongest nothing folds over or tears, and the shader finds ev
   }
 });
 
-// ---------- Schematics: how the sheets fade and drift (nothing is drawn without a screen) ----------
+// ---------- Schematics: the figures' lives, where they go and how they move (nothing is drawn without a screen) ----------
 
 function loadSchematic() {
   const ctx = { Math };
   vm.createContext(ctx);
   const src = ['kit.js', 'schematic.js'].map(f => fs.readFileSync(path.join(__dirname, '../wallpaper/js', f), 'utf8')).join('\n;\n');
-  vm.runInContext(src + ';this.Schematic = Schematic;', ctx);
+  vm.runInContext(src + ';this.Kit = Kit; this.Schematic = Schematic;', ctx);
   return ctx;
 }
 
-test('schematic: the sheets take turns, each a while fully in, always about as much drawing', () => {
-  const { Schematic } = loadSchematic();
-  const N = 600, full = [0, 0, 0], out = [0, 0, 0];
-  for (let k = 0; k < N; k++) {
-    const t = k / N * Schematic.FADE, f = Schematic.fades(t), sum = f.reduce((a, b) => a + b, 0);
-    assert.strictEqual(f.length, 3);
-    assert.ok(sum >= 1.2 && sum <= 1.8, `${sum.toFixed(2)} sheets showing at ${t.toFixed(1)}s`);
-    f.forEach((v, i) => {
-      assert.ok(v >= 0 && v <= 1, `sheet ${i} at ${v}`);
-      if (v === 1) full[i]++;
-      if (v === 0) out[i]++;
-    });
+// A field run at 30 fps from the start to `until` s, `each(t, field, Schematic)` called every half second.
+const MAKISE_FOCUS = { x: 600, y: 790, rx: 720, ry: 800 };
+function runField(seed, until, each) {
+  const { Kit, Schematic } = loadSchematic();
+  const field = new Schematic.Field(Kit.rng(seed));
+  field.keepClear(MAKISE_FOCUS);
+  for (let k = 0; k <= until * 30; k++) {
+    field.update(k / 30);
+    if (k % 15 === 0 && each) each(k / 30, field, Schematic);
   }
-  // Each sheet is fully in, and fully out, for at least a fifth of its cycle.
-  for (let i = 0; i < 3; i++) assert.ok(full[i] > N / 5 && out[i] > N / 5, `sheet ${i} fully in ${full[i]}/${N}, out ${out[i]}/${N}`);
-});
+  return { field, Schematic };
+}
 
-test('schematic: the sheets drift slowly and smoothly, however long it runs', () => {
-  const { Schematic } = loadSchematic();
-  const { w, h } = Schematic.SHEET, cam = { x: 0, y: 0 };
-  const apart = (a, b, n) => Math.abs((b - a) - n * Math.round((b - a) / n));
-  for (let i = 0; i < 3; i++) {
-    for (const t0 of [0, 3600, 86400 * 30]) {
-      const a = Schematic.place(i, t0, cam), b = Schematic.place(i, t0 + 1, cam);
-      for (const p of [a, b]) assert.ok(p.x >= 0 && p.x < w && p.y >= 0 && p.y < h, `sheet ${i} at ${p.x},${p.y}`);
-      const moved = Math.hypot(apart(a.x, b.x, w), apart(a.y, b.y, h));
-      assert.ok(moved < 8, `sheet ${i} moved ${moved.toFixed(1)} px in a second at ${t0}s`);
-      assert.ok(Math.abs(b.zoom - a.zoom) < 0.01 && Math.abs(b.turn - a.turn) < 0.01, `sheet ${i} jumped at ${t0}s`);
+test('schematic: parts draw on one after another, from nothing to whole, then erase', () => {
+  const { Schematic: S } = loadSchematic();
+  const f = { born: 10, inT: 3, dies: 50, outT: 2 };
+  const at = t => { const [on, off] = S.phase(f, t); return [on, off]; };
+  assert.deepStrictEqual(at(10), [0, 0]);
+  assert.deepStrictEqual(at(13), [1, 0]);
+  assert.deepStrictEqual(at(52), [1, 1]);
+  for (const n of [1, 3, 5]) {
+    for (let i = 0; i < n; i++) {
+      assert.strictEqual(S.stagger(0, i, n), 0);
+      assert.strictEqual(S.stagger(1, i, n), 1);
+      for (let u = 0, prev = 0; u <= 1; u += 0.05) { const v = S.stagger(u, i, n); assert.ok(v >= prev); prev = v; }
+      if (i) assert.ok(S.stagger(0.3, i, n) <= S.stagger(0.3, i - 1, n), 'a later part ran ahead of an earlier one');
     }
   }
 });
 
-test('schematic: the sheets drift with the cursor, as the deepest layer', () => {
-  const { Schematic } = loadSchematic();
-  const { w } = Schematic.SHEET;
-  for (let i = 0; i < 3; i++) {
-    const a = Schematic.place(i, 10, { x: 0, y: 0 }), b = Schematic.place(i, 10, { x: 1, y: 0 });
-    // The point at the middle of the frame slides back along the sheet: the sheet moves
-    // the way the cursor did.
-    const d = (b.x - a.x) - w * Math.round((b.x - a.x) / w);
-    assert.ok(d < -30, `sheet ${i} moved ${d.toFixed(1)} px along itself`);
-  }
+test('schematic: always about the same number of figures, and always one drawing on or off', () => {
+  let quiet = 0, longest = 0;
+  runField(5, 3600, (t, field, S) => {
+    // On screen, counting those erasing themselves while their replacements draw on; and
+    // never more than COUNT staying.
+    assert.ok(field.figs.length >= S.COUNT - 1 && field.figs.length <= S.COUNT + 5, `${field.figs.length} figures at ${t}s`);
+    assert.ok(field.staying(field.figs, t) <= S.COUNT, `${field.staying(field.figs, t)} figures staying at ${t}s`);
+    assert.ok(field.staying(field.rules, t) <= S.RULES, `${field.rules.length} long lines at ${t}s`);
+    const busy = field.figs.some(f => { const [on, off] = S.phase(f, t); return on < 1 || off > 0; });
+    quiet = busy ? 0 : quiet + 0.5;
+    longest = Math.max(longest, quiet);
+  });
+  assert.ok(longest <= 6, `nothing drew on or off for ${longest}s`);
+});
+
+test('schematic: figures spread out, never piled up and leaving no bare patch', () => {
+  let worst = 0;
+  runField(7, 1800, (t, field) => {
+    if (t % 10) return;
+    // A new figure may draw itself on where an old one is erasing; those staying never pile up.
+    const figs = field.figs.filter(f => t < f.dies);
+    for (let i = 0; i < figs.length; i++) {
+      for (let j = i + 1; j < figs.length; j++) {
+        const a = figs[i], b = figs[j];
+        assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > (a.room + b.room) * 0.45, `${a.kind} and ${b.kind} piled up at ${t}s`);
+      }
+    }
+    // The barest place in the open frame: inside the vignetted edges, and outside the pool
+    // of dark around the centrepiece (inside three quarters of it, it still dims the
+    // figures by a seventh or more, and Makise covers much of it).
+    for (let y = 240; y <= 1200; y += 120) {
+      for (let x = 240; x <= 2320; x += 120) {
+        if (Math.hypot((x - 600) / 540, (y - 790) / 600) < 1) continue;
+        worst = Math.max(worst, Math.min(...figs.map(f => Math.hypot(x - f.x, y - f.y) - f.room)));
+      }
+    }
+  });
+  assert.ok(worst < 420, `a bare patch ${worst.toFixed(0)} px from any figure`);
+});
+
+test('schematic: each figure moves its own way, and the cursor moves each by its own depth', () => {
+  const { field } = runField(9, 60);
+  const figs = field.figs.slice(0, 10);
+  const moves = figs.map(f => { const a = field.where(f, 60), b = field.where(f, 75); return [b.x - a.x, b.y - a.y]; });
+  const spread = Math.max(...moves.map(m => Math.hypot(m[0] - moves[0][0], m[1] - moves[0][1])));
+  assert.ok(spread > 5, `the figures moved together, within ${spread.toFixed(1)} px of each other`);
+  const still = figs.map(f => field.where(f, 60).x);
+  field.cam.x = 1;
+  const pushed = figs.map((f, i) => field.where(f, 60).x - still[i]);
+  assert.ok(pushed.every(d => d > 0), 'a figure moved against the cursor');
+  assert.ok(Math.max(...pushed) - Math.min(...pushed) > 10, 'the cursor moved every figure the same');
+});
+
+test('schematic: a worldline shift erases them all quickly and draws a fresh set', () => {
+  const { Kit, Schematic: S } = loadSchematic();
+  const field = new S.Field(Kit.rng(11));
+  field.keepClear(MAKISE_FOCUS);
+  let t = 0;
+  for (; t < 100; t += 1 / 30) field.update(t);
+  const before = new Set(field.figs);
+  field.shift(t);
+  for (const end = t + 2; t < end; t += 1 / 30) field.update(t);
+  assert.ok(field.figs.every(f => !before.has(f)), 'figures from before the shift still there after 2 s');
+  for (const end = t + 8; t < end; t += 1 / 30) field.update(t);
+  assert.ok(field.figs.length >= S.COUNT - 2, `only ${field.figs.length} figures 10 s after the shift`);
+});
+
+test('schematic: no gears, and no rows of diamonds', () => {
+  const { Schematic: S } = loadSchematic();
+  for (const k of Object.keys(S.KINDS)) assert.ok(!/gear|train|diamond/i.test(k), `a ${k} among the figures`);
 });
 
 process.exitCode = failures ? 1 : 0;

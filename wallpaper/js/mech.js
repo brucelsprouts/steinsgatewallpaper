@@ -2,7 +2,7 @@
 // Clockwork: dials, hands, gears and an escapement, pre-rendered per depth plane
 // and placed each frame with a gentle affine "3D tilt".
 const Mech = (() => {
-  const { TAU, canvas, clamp, ease, hash } = Kit;
+  const { TAU, canvas, clamp, ease, hash, stepped } = Kit;
 
   const PALETTES = {
     warm: { line: '196,170,140', rim: '178,148,118', solid: '17,14,11', jewel: '200,50,72' },
@@ -351,12 +351,6 @@ const Mech = (() => {
   }
 
   // ---------- Motion helpers ----------
-  // Stepped rotation: advance `amount` every `period` seconds, eased over `dur`.
-  function stepped(t, period, dur, amount, offset = 0) {
-    const u = t / period + offset, n = Math.floor(u);
-    return amount * (n + ease.inOut(clamp((u - n) * period / dur)));
-  }
-
   // Worldline-shift kicks: each shift moves a part by some amount, fast then settling.
   // Settled kicks fold into `base`, so cost stays flat however many shifts happen.
   const KICK = 2.6;
@@ -524,5 +518,5 @@ const Mech = (() => {
     }
   }
 
-  return { Assembly, PALETTES, Mat, gearDims, gearPath };
+  return { Assembly, PALETTES, Mat, gearDims };
 })();
