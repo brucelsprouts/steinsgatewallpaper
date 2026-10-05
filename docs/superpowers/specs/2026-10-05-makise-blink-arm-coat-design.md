@@ -51,16 +51,20 @@ A new effect kind, **Blink**, in `rig.js` and the editor.
 ### The blink mask for makise.webp
 
 Made by `rigmap.py` from each eye's lash lines, measured from the picture column by column
-(the bottom of the upper lash and the top of the lower lid):
+(the top and bottom of the upper lash, and the top of the lower lid):
 
-- her right eye (screen left) at x 362–396, open up to 22 px; her left eye (screen right)
-  at x 441–466, open up to 21 px;
-- per column, with `T` how far the eye is open there: nothing above the lid ramp; rising
-  over the lid (from `0.8 T` above the 5 px upper lash) to `T` at the lash's resting place
-  on the lower lid; `T` over that 5 px; then dropping to nothing within 1.5 px under the
-  lower lid. Stored as `T / Travel`.
+- her right eye (screen left) at x 360–398, open up to 22 px; her left eye (screen right)
+  at x 441–467, open up to 21 px;
+- per column, with `T` how far the eye is open there: nothing above a thin strip of lid
+  (`max(4, 0.4 T)` px above the lash); rising over that strip to `T` where the lash
+  comes to rest on the lower lid; `T` over the lash's own thickness (5–9 px, measured), so
+  the whole lash comes down unstretched; then dropping to nothing within 1.5 px under
+  the lower lid. Stored as `T / Travel` (Travel 24).
 - So, fully shut, each column's lash lands exactly on its lower lid, and the shut eye
   follows the lower lid's curve. At the corners `T` tapers to nothing.
+- Where the lids meet, the whole eye between them is squeezed into the mask's last px or
+  two (it's stored at half size), which showed as a light sliver under the shut lash. The
+  shader darkens what is squeezed there (by up to 75%), so it reads as lash.
 - Hair strands that cross the eye come down with the lid for those few frames.
 
 ## Her left arm (screen right)

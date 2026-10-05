@@ -66,16 +66,15 @@ MID = 440                            # the middle of her body
 CHEST = (290, 620)                   # rows over which the breath eases off, shoulders to waist
 NECK = (230, 330)                    # rows over which the head's parallax eases off
 MARGIN = 16                          # how far the hold reaches over what moves beside it (px)
-EYELIDS = [  # each eye, column by column: x, the bottom of its upper lash, the top of its lower lid
-    [(360, 155, 155), (362, 156, 158), (364, 154, 162), (366, 153, 167), (368, 152, 168), (370, 151, 169),
-     (372, 151, 170), (374, 150, 170), (376, 150, 171), (378, 150, 171), (380, 149, 171), (382, 150, 170),
-     (384, 150, 168), (386, 150, 168), (388, 150, 168), (390, 151, 167), (392, 152, 164), (394, 153, 163),
-     (396, 150, 154), (398, 150, 150)],
-    [(441, 133, 133), (444, 130, 147), (446, 130, 147), (448, 129, 148), (450, 128, 148), (452, 128, 147),
-     (454, 127, 147), (456, 127, 147), (458, 127, 148), (460, 130, 149), (462, 133, 147), (464, 136, 146),
-     (467, 139, 139)],
+EYELIDS = [  # each eye, column by column: x, the top and bottom of its upper lash, the top of its lower lid
+    [(360, 149, 155, 155), (362, 149, 156, 158), (364, 149, 154, 162), (366, 149, 153, 167), (368, 148, 152, 168),
+     (370, 147, 151, 169), (372, 146, 151, 170), (374, 146, 150, 170), (376, 144, 150, 171), (378, 144, 150, 171),
+     (380, 145, 149, 171), (382, 145, 150, 170), (384, 145, 150, 168), (386, 146, 150, 168), (388, 147, 150, 168),
+     (390, 147, 151, 167), (392, 148, 152, 164), (394, 151, 153, 163), (396, 147, 150, 154), (398, 148, 150, 150)],
+    [(441, 126, 133, 133), (444, 125, 130, 147), (446, 123, 130, 147), (448, 122, 129, 148), (450, 122, 128, 148),
+     (452, 122, 128, 147), (454, 120, 127, 147), (456, 120, 127, 147), (458, 121, 127, 148), (460, 121, 130, 149),
+     (462, 128, 133, 147), (464, 130, 136, 146), (467, 132, 139, 139)],
 ]
-LASH = 5                             # how thick the upper lash is
 TRAVEL = 24                          # how far the lid comes down where its mask is full
 ELBOW = (640, 560)                   # her left elbow
 FOREARM = [  # her left sleeve below the elbow, its cuff and her hand: out over the air beside
@@ -170,21 +169,22 @@ flutter = blur(coat * smooth(500, 860, ys) * smooth(70, 190, np.abs(xs - MID)) *
 breath = 1 - smooth(CHEST[0], CHEST[1], ys)
 head = (1 - smooth(NECK[0], NECK[1], ys)) * blur(reach(opaque, 4, 30), 8)
 
-# She blinks: in each column of each eye, the lid above comes down so the upper lash lands
-# on the lower lid. Stored as how far (over TRAVEL): nothing above the lid, rising over it
-# to the full height the eye is open there, held over the lash's resting place on the
-# lower lid, and gone within a px or two below it.
+# She blinks: in each column of each eye, the upper lash comes down whole onto the lower
+# lid, and a thin strip of lid above it stretches down behind it. Stored as how far (over
+# TRAVEL): nothing above that strip, rising over it to the full height the eye is open
+# there, held over the lash's resting place on the lower lid, and gone within a px or two
+# below it.
 blink = np.zeros((H, W), np.float32)
 rows = np.arange(H, dtype=np.float32)
 for eye in EYELIDS:
-    ex, lash, lid = (np.array(c, np.float32) for c in zip(*eye))
+    ex, top, lash, lid = (np.array(c, np.float32) for c in zip(*eye))
     for x in range(int(ex[0]), int(ex[-1]) + 1):
-        b, l = np.interp(x, ex, lash), np.interp(x, ex, lid)
+        t, b, l = (np.interp(x, ex, c) for c in (top, lash, lid))
         T = l - b
         if T <= 0:
             continue
-        top = b - LASH - max(3.0, 0.8 * T)
-        ramp = np.clip((rows - top) / (l - LASH - top), 0, 1)
+        start = t - max(4.0, 0.4 * T)
+        ramp = np.clip((rows - start) / (l - (b - t) - start), 0, 1)
         blink[:, x] = np.maximum(blink[:, x], T / TRAVEL * np.where(rows <= l, ramp, np.clip(1 - (rows - l) / 1.5, 0, 1)))
 
 # Her left forearm bends at the elbow: its sleeve, cuff and hand, reaching out over the air

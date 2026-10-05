@@ -364,14 +364,14 @@ ${maps.map(i => `  vec4 a${i} = texture2D(m${i}, t);`).join('\n')}
 ${sum}
   return d;
 }${blinks.length ? `
-// Where a blink takes its colour from instead of q: further up, by as much as is painted
-// there and as shut as the eyes are.
+// How far a blink looks further up for the colour at q: by as much as is painted there
+// and as shut as the eyes are.
 vec2 lid(vec2 q) {
   vec2 t = q / size;
 ${lids.map(i => `  vec4 a${i} = texture2D(m${i}, t);`).join('\n')}
   vec2 l = vec2(0.0);
 ${blinks.map(([e, i]) => `  l += ${M(e)} * fx[${2 * i}].xy;`).join('\n')}
-  return q - l;
+  return l;
 }` : ''}
 vec4 shown(vec2 t) {
 ${maps.map(i => `  if (ovMap < ${i}.5) return texture2D(m${i}, t);`).join('\n')}
@@ -379,6 +379,7 @@ ${maps.map(i => `  if (ovMap < ${i}.5) return texture2D(m${i}, t);`).join('\n')}
 }
 void main() {
   vec2 p = uv * size, q = p;
+  float squeeze = 0.0;
   if (still < 0.5) {${used.length ? `
     // Plain rounds first, then damped ones, which settle even where the picture is
     // stretched to more than twice its size.
@@ -386,10 +387,16 @@ void main() {
     q = p - field(q);
     q = mix(q, p - field(q), 0.6);
     q = mix(q, p - field(q), 0.6);` : ''}${blinks.length ? `
-    q = lid(q); // and the eyes blink, there` : ''}
+
+    // The eyes blink, there. Where the lids meet, all of the eye between them is squeezed
+    // into a px or two: that shows as lash, darkened, not as a sliver of eye.
+    vec2 l = lid(q), u = l / max(length(l), 1e-4);
+    squeeze = max(0.0, -dot(lid(q + u) - l, u));
+    q -= l;` : ''}
   }
   vec2 t = q / size;
   vec4 c = texture2D(pic, t) * step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);
+  c.rgb *= 1.0 - 0.75 * clamp((squeeze - 0.5) / 3.0, 0.0, 1.0);
   if (ovK > 0.0) c = mix(c, vec4(ovCol, 1.0), ovK * dot(shown(t), ovSel));
   gl_FragColor = c * (1.0 - smoothstep(1.0 - fade, 1.0, uv.y));
 }`;

@@ -532,7 +532,7 @@ test('rig: shut, a blink shows what is above the eye; open, it moves nothing', (
   while (Rig.shut(t, blink) > 0 || Math.abs(t - 100) < 1) t += 0.25;
   assert.deepStrictEqual([...Rig.blinked(rig.effects, m.values(t, rig.effects), mask, [50, 50])], [50, 50], 'open, it moves nothing');
   const src = Rig.fragment(rig.effects, 1);
-  assert.ok(src.includes('l += a0.g * fx[2].xy') && src.includes('q = lid(q)') && !src.includes('d += a0.g'), 'the shader blinks after the push');
+  assert.ok(src.includes('l += a0.g * fx[2].xy') && src.includes('q -= l;') && !src.includes('d += a0.g'), 'the shader blinks after the push');
 });
 
 test('rig: with Idle a spring drifts about on its own, slowly, each in its own time', () => {
