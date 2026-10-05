@@ -4,7 +4,7 @@
      (node tools/serve.js) and open http://localhost:5173/tools/rig.html. Save writes the rig
      beside the picture (wallpaper/img/makise-rig.js and its masks).
      Keys: B paint, E erase, S smooth, [ ] brush size, Shift+[ ] softness, 1-9 and 0
-     strength, Alt+click picks a strength up, M mask, Space play, F fit, G gust, W wander,
+     strength, Alt+click picks a strength up, M mask, Space play, F fit, G gust, K blink, W wander,
      Up/Down another effect, Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo, Ctrl+S save. -->
 <html lang="en">
 <head>
@@ -133,6 +133,7 @@
       <button data-add="wave" title="Ripples running across it: hair, loose cloth">Waves</button>
       <button data-add="breathe" title="Rises and falls with each breath">Breathe</button>
       <button data-add="parallax" title="Shifts with the cursor, as if nearer or farther">Parallax</button>
+      <button data-add="blink" title="Shuts the eyes now and then: the lid comes down over what's painted">Blink</button>
       <button data-add="hold" title="What must never bend">Hold still</button>
     </div>
   </aside>
@@ -178,10 +179,11 @@
       <label class="check"><input type="checkbox" id="wander"> Wander <kbd>W</kbd></label>
       <button id="flick" title="Throw the cursor across the screen">Flick</button>
       <button id="gust" title="A gust of wind now (G)">Gust</button>
+      <button id="blink" title="A blink now (K)">Blink</button>
     </div>
   </aside>
 </main>
-<footer>B paint · E erase · S smooth · [ ] size · 1–0 strength · Alt+click picks strength · M mask · Space play · F fit · wheel zoom · right-drag pan · Ctrl+Z undo · Ctrl+S save</footer>
+<footer>B paint · E erase · S smooth · [ ] size · 1–0 strength · Alt+click picks strength · M mask · Space play · F fit · G gust · K blink · W wander · wheel zoom · right-drag pan · Ctrl+Z undo · Ctrl+S save</footer>
 <script src="../wallpaper/js/kit.js"></script>
 <script src="../wallpaper/js/rig.js"></script>
 <script src="../wallpaper/js/portrait.js"></script>
@@ -365,7 +367,7 @@ function draw() {
   g.strokeStyle = 'rgba(255,255,255,0.08)';
   g.strokeRect(v.x - 0.5, v.y - 0.5, ed.W * v.k + 1, ed.Hs * v.k + 1);
   if (e && e.kind === 'swing') pivot(e);
-  if (e && (e.kind === 'wave' || e.kind === 'breathe')) arrow(e);
+  if (e && (e.kind === 'wave' || e.kind === 'breathe' || e.kind === 'blink')) arrow(e);
   // The brush.
   if (ed.mouse && e && !ed.pan && !ed.drag && !nearPivot(ed.mouse)) {
     const [mx, my] = ed.mouse, r = ed.brush.size / 2 * v.k;
@@ -736,8 +738,8 @@ function props() {
   };
   $('#on').checked = e.on;
   $('#on').onchange = () => toggle(e);
-  $('#holdrow').hidden = e.kind === 'hold';
-  if (e.kind !== 'hold') {
+  $('#holdrow').hidden = !('hold' in e); // the hold itself, and blinks, which pay it no heed
+  if ('hold' in e) {
     $('#hold').checked = e.hold;
     $('#hold').onchange = () => { record({ type: 'param', e, key: 'hold', before: e.hold, after: !e.hold }); e.hold = !e.hold; dirty(); };
   }
@@ -837,6 +839,7 @@ function wander(on = !ed.wander) { ed.wander = on; $('#wander').checked = on; }
 $('#wander').onchange = ev => wander(ev.target.checked);
 $('#flick').onclick = () => { wander(false); ed.cursor = { x: ed.cursor.x > 0 ? -1 : 1, y: 0 }; pad(); };
 $('#gust').onclick = () => { ed.motion.blow(ed.t); say('A gust'); };
+$('#blink').onclick = () => { ed.motion.blink(ed.t); say('A blink'); };
 
 // ---------- Saving ----------
 const base64 = blob => new Promise(resolve => {
@@ -864,7 +867,7 @@ async function files() {
   const effects = ed.effects.map((e, i) => {
     const d = { kind: e.kind, name: e.name };
     if (!e.on) d.on = false;
-    if (e.kind !== 'hold') d.hold = e.hold;
+    if ('hold' in e) d.hold = e.hold;
     d.mask = [Math.floor(i / 3), i % 3];
     for (const k of Object.keys(KINDS[e.kind].params)) d[k] = round(e[k]);
     if (e.pivot) d.pivot = e.pivot.map(Math.round);
@@ -944,6 +947,7 @@ window.addEventListener('keydown', ev => {
   else if (k === ' ') play();
   else if (k === 'f') fitView();
   else if (k === 'g') $('#gust').click();
+  else if (k === 'k') $('#blink').click();
   else if (k === 'w') wander();
   else if (k === 'arrowup' || k === 'arrowdown') {
     const i = ed.effects.indexOf(ed.sel) + (k === 'arrowup' ? -1 : 1);
