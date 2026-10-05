@@ -83,11 +83,19 @@ silhouette) stands in. If no picture loads at all, the nixie meter takes its pla
   the loose ends, hardly at all where it rests on her shoulders. It swings in a breeze
   that now and then gusts, trails behind when she drifts with the cursor, and ripples;
 - her **arms** swing gently from the shoulders inside her **jacket**, whose loose cuffs
-  and hem, hanging away from her body, flutter a little more;
+  and hem, hanging away from her body, flutter;
+- her **left arm** (on the right) drifts about on its own, slowly, and bends a little at
+  the elbow, its forearm and hand lagging the shoulder, never dragging the coat it lies
+  against;
+- the **jacket round her legs** sways in the breeze and trails behind as she drifts,
+  free toward the hem and still at the waist;
+- her **tie** sways a little from its knot;
+- she **blinks** now and then, at random, sometimes twice: for a frame or two her upper
+  lashes come down onto her lower lids;
 - she **breathes**, softly: her head and shoulders rise a pixel or so;
 - her **head** sits a little nearer than the rest, so it shifts a touch more with the cursor.
 
-Her face, eyes, shirt, tie, belt, shorts and legs never bend.
+Her face, shirt, belt, shorts and legs never bend.
 
 It works the way Wallpaper Engine animates a picture with its Shake, Water waves and
 Depth parallax effects and its puppet warp's spring bones: nothing is cut out of the
@@ -95,6 +103,8 @@ picture and nothing has to be filled in behind. Each effect pushes the pixels of
 picture by as much as was painted for it, and the picture around a moving part stretches
 and squeezes to follow over the soft edge of what was painted. So nothing can open a gap,
 nothing is dragged along by a lock of hair, and what is painted **Hold still** stays put.
+The blink is done the way Wallpaper Engine's creators do it with Shake: what's painted
+over each eye takes its colour from further up, so the lid comes down over the eye.
 
 The rig is `makise-rig.js` beside `makise.webp`, with the masks it names
 (`makise-rig-0.png` and so on, three masks to a picture: red, green and blue, at half
@@ -114,13 +124,19 @@ and open <http://localhost:5173/tools/rig.html> (or **Rig editor** in the previe
 - On the left, her **effects**. Click one to paint it and set it up, ● to switch it off
   and on; add more below:
   - **Sway**: trails behind as she drifts and blows in the breeze, on a spring
-    (strength, wind, stiffness, damping, limit);
+    (strength, wind, stiffness, damping, limit, and idle: how far it drifts about on its
+    own, slowly, as if she shifted it);
   - **Swing**: the same, but turning about a pivot you drag onto the picture (an arm in
-    its sleeve);
+    its sleeve; a forearm about its elbow, on top of the arm's own swing);
   - **Waves**: ripples running across it (strength, length, speed, direction, how much
     stronger in gusts, how far out of step neighbouring strands run);
   - **Breathe**: rises and falls with each breath (strength, direction, period);
   - **Parallax**: shifts with the cursor, as if nearer (or, with a depth below 0, farther);
+  - **Blink**: shuts the eyes now and then (travel, every so many seconds on average,
+    length, how often twice, direction). Paint each eye strongest just above its lower
+    lash, fading up over the lid, with a sharp edge under the lower lash: where it's
+    painted, the picture takes its colour from that much further up. It pays Hold still
+    no heed. Effects with the same timing blink together, so paint both eyes in one;
   - **Hold still**: what must never bend. Sway, swing and waves leave it be; breathing
     and parallax still carry it, whole. Each effect can be told to ignore it.
 - Paint where the chosen effect works: brighter is stronger. **Paint**, **Erase** and
@@ -129,13 +145,14 @@ and open <http://localhost:5173/tools/rig.html> (or **Rig editor** in the previe
   the picture holds still while you paint, so the brush lands where you see it.
 - It moves on the page just as it will on the desktop: drag the cursor pad to see her
   drift and her hair trail and the parallax, **Wander** to have the cursor wander about,
-  **Flick** to throw it across, **Gust** for a gust of wind, at ¼× to 2× speed.
+  **Flick** to throw it across, **Gust** for a gust of wind, **Blink** to blink now, at ¼×
+  to 2× speed.
 - **Save** writes the rig beside the picture (only through `tools/serve.js`; elsewhere
   **Download** gives you the files in a zip). Undo and redo go back 100 steps.
 
 Keys: B paint, E erase, S smooth, `[` `]` brush size (with Shift, softness), 1–9 and 0
 strength, Alt+click picks up the strength under the brush, M mask, Space play, F fit,
-G gust, W wander, ↑ ↓ another effect, wheel zoom, right-drag pan, Ctrl+Z undo,
+G gust, K blink, W wander, ↑ ↓ another effect, wheel zoom, right-drag pan, Ctrl+Z undo,
 Ctrl+Shift+Z redo, Ctrl+S save.
 
 Soft edges matter: where a mask goes from moving to still, the picture between stretches,
@@ -147,10 +164,12 @@ It all runs on the GPU (WebGL, `wallpaper/js/rig.js`). Without WebGL, or where t
 browser treats a local picture as foreign (it can under `file://`), the picture is drawn
 whole and holds still apart from floating.
 
-The starting rig was made by `python tools/rigmap.py` from the colours of the hair and
-jacket inside regions placed (and, for the long lock, traced) by hand for this picture,
-then the editor takes over. Running `rigmap.py` again starts the rig over. For another
-picture, start a rig in the editor: it opens with just a **Hold still** to paint.
+The starting rig was made by `python tools/rigmap.py` from the colours of the hair,
+jacket and tie inside regions placed (and, for the long lock and the left forearm, traced)
+by hand for this picture, and from each eye's lash lines measured column by column; then
+the editor takes over. Running `rigmap.py` again starts the rig over (the hair masks
+shipped now were touched up in the editor since). For another picture, start a rig in
+the editor: it opens with just a **Hold still** to paint.
 
 ## How it behaves
 
@@ -167,10 +186,11 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
   - in Worldline mode, triggers a full shift.
 - **Moving the mouse** gives parallax: the deep clockwork drifts with the cursor while the
   nearer layers and the centrepiece move against it.
-- **Makise** floats in place, bobbing gently, and breathes. Her hair sways and ripples in
-  a breeze that now and then gusts and trails behind her as she drifts with the cursor;
-  her arms swing a little in her jacket, its loose cuffs fluttering, and her head shifts a
-  touch more than the rest with the cursor.
+- **Makise** floats in place, bobbing gently, and breathes, and blinks every few seconds.
+  Her hair sways and ripples in a breeze that now and then gusts and trails behind her as
+  she drifts with the cursor; her arms swing a little in her jacket, her left arm drifting
+  and bending a little at the elbow, the jacket round her legs swaying and its loose cuffs
+  fluttering, her tie swaying; her head shifts a touch more than the rest with the cursor.
 - With **Worldline shifts** off, nothing shifts and clicks do nothing.
 - **Ink** forms on its own every few seconds, a dozen or so at a time: an ink blot
   spreading from the drops that start it, a patch of grungy texture, or a splash with
@@ -326,7 +346,7 @@ Code layout (`wallpaper/js`):
 | `config.js` | Settings from the URL, Lively and Wallpaper Engine |
 | `nixie.js` | The meter: glowing digits, unlit cathodes, honeycomb, bloom, haze, streak, scramble and flash (and the glass tubes and walnut base it can be shown in) |
 | `portrait.js` | The Makise centrepiece: loading the picture and its rig, grading, feathering, backlight, float, glitch |
-| `rig.js` | Brings a rigged picture to life in WebGL: effects painted onto the one picture (sway, swing, waves, breathing, parallax, hold), their springs and the breeze |
+| `rig.js` | Brings a rigged picture to life in WebGL: effects painted onto the one picture (sway, swing, waves, breathing, parallax, blink, hold), their springs, the breeze and the blinks |
 | `mech.js` | Dials, hands, gears, escapement; 3D tilt; stepped motion |
 | `paint.js` | Drafting marks, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |

@@ -44,7 +44,7 @@ Every 20–60 minutes the worldline shifts: the picture tears into glitching sli
 [h2]Features[/h2]
 [list]
 [*][b]Two centrepieces:[/b] an animated Makise Kurisu, or a nixie divergence meter showing the time (HH.MM.SS), the date (YY.MM.DD) or a worldline
-[*][b]Makise comes to life:[/b] her hair sways and ripples in a gusting breeze, her sleeves swing, she breathes and floats. Her face never warps.
+[*][b]Makise comes to life:[/b] her hair sways and ripples in a gusting breeze, her sleeves swing and her left arm bends a little, her coat sways around her legs, she blinks now and then, breathes and floats. Her face holds still but for her blinks.
 [*][b]Worldline shifts[/b] at random. In Time or Date mode the meter lands on a canon worldline (0.571024, 0.337187, 1.130205, 1.048596) for a few seconds, then rolls back.
 [*][b]Cursor parallax:[/b] the deep clockwork drifts with your mouse while the nearer layers move against it
 [*][b]Click the desktop[/b] to spin the clocks and flash the meter (in Worldline mode, to trigger a full shift)
