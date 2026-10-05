@@ -18,17 +18,18 @@ const Scene = (() => {
   function compose() {
     return [
       // ---- Deep clockwork ----
+      // Sharp, but faint: the depth is in how dim they are and how they move, not in blur.
       // A half clock hanging from the top, its lowest numerals beside the centrepiece's
       // head rather than behind it, and a degree scale inside it that steps the other way.
-      new A({ x: 380, y: -300, depth: -0.8, blur: 1.4, res: 0.8, alpha: 0.2, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
+      new A({ x: 380, y: -300, depth: -0.8, blur: 0.35, res: 1, alpha: 0.2, rx: 0.2, ry: 0.05, seed: 3, drift: 10,
         parts: [
           { type: 'dial', r: 780, hands: false, track: false, turn: -1 },
           { type: 'dial', r: 560, face: 'scale', hands: false, track: false, turn: 1 },
         ] }),
       // The astrolabe: a giant dial whose rings step against each other.
-      new A({ x: 2000, y: 560, depth: -0.6, blur: 1.6, res: 0.8, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
+      new A({ x: 2000, y: 560, depth: -0.6, blur: 0.4, res: 1, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
         parts: [{ type: 'dial', r: 820, ring24: true }] }),
-      new A({ x: 2330, y: 1330, depth: -0.45, blur: 1.2, res: 0.85, alpha: 0.1, rx: 0.15, ry: 0.2, seed: 2,
+      new A({ x: 2330, y: 1330, depth: -0.45, blur: 0.35, res: 1, alpha: 0.1, rx: 0.15, ry: 0.2, seed: 2,
         beat: { period: 3, dur: 1.2, teeth: 0.25 },
         parts: [{ type: 'gear', pitch: 44, teeth: 48, spokes: 6, curved: true }] }),
 
