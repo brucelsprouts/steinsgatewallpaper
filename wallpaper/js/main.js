@@ -48,11 +48,11 @@
   const screen = new Atmos.Tone({ cell: 12, color: 'rgb(228,218,206)', blend: 'screen' });
   const onMakise = new Atmos.Tone({ cell: 7, color: 'rgb(60,60,60)', blend: 'soft-light', res: 1, seed: 67 });
   const texture = () => Config.get('texture') / 50;
-  // The schematics: faint drafting figures behind everything, drawing themselves on and
-  // off. The setting (0-100, 50 as designed) scales how bright their lines are.
-  const figures = new Schematic.Field(Kit.rng(seed + 11));
+  // The schematics: one faint drafting drawing behind everything, slowly redrawing
+  // itself. The setting (0-100, 50 as designed) scales how bright its lines are.
+  const drafting = new Schematic.Field(Kit.rng(seed + 11));
   const schematic = () => Config.get('schematic') / 50;
-  backdrop.cam = figures.cam = scene.dust.cam;
+  backdrop.cam = drafting.cam = scene.dust.cam;
   smoke.cam = light.cam = scene.dust.cam; // they drift with the near air
   scene.dust.beam = (x, y, t) => light.beamAt(x, y, t); // dust glints in the light shafts
   // Clocks spin on every shift and click, and the picture flickers; a real worldline
@@ -61,7 +61,7 @@
   controller.onShift = (t, worldline) => {
     scene.shifts.push(t);
     portrait.hit(t, worldline);
-    if (worldline) { scene.ink.shift(t); light.flare(t); figures.shift(t); }
+    if (worldline) { scene.ink.shift(t); light.flare(t); drafting.shift(t); }
   };
   if (q.get('worldline')) controller.worldline = q.get('worldline'); // debug: pin the boot worldline
   if (cursor) { scene.pointer(cursor[0], cursor[1]); scene.settle(); }
@@ -80,8 +80,8 @@
     scene.build(view.S, view, theme(), f);
     smoke.build(view, f);
     backdrop.build(view, f);
-    figures.build(view);
-    figures.keepClear(f);
+    drafting.build(view);
+    drafting.keepClear(f);
     // The screentone: around the middle of the centrepiece, and out into the empty strip
     // down the left edge.
     // The screentone and the halftone are Makise's alone.
@@ -149,14 +149,14 @@
     ctx.fillStyle = '#040303';
     ctx.fillRect(0, 0, view.W, view.H);
     // The schematics first: faint lines on the black, everything else drawn over them.
-    const sk = schematic();
-    if (sk > 0) figures.draw(ctx, view, t, 0.35 * sk);
+    const sk = schematic(), m = scene.meterOffset(t);
+    if (sk > 0) drafting.draw(ctx, view, t, 0.2 * sk, m);
     scene.drawBehind(ctx, view, t, now);
     // The backdrop and the screentone go in after the pool of dark the scene keeps around
     // the centrepiece, so they reach the whole frame and show in that pool; the backdrop
     // eases off around the centrepiece by itself. The screentone and the halftone on
     // Makise move with the centrepiece.
-    const tx = texture(), m = scene.meterOffset(t), makise = centre() === 'makise';
+    const tx = texture(), makise = centre() === 'makise';
     if (tx > 0) backdrop.draw(ctx, view, t, 0.045 * tx);
     if (makise) {
       if (tx > 0) screen.draw(ctx, view, 0.085 * tx, m);
@@ -188,7 +188,7 @@
     scene.update(t);
     portrait.update(t, scene.meterOffset(t), scene.meterCam);
     light.update(t);
-    figures.update(t);
+    drafting.update(t);
   }
 
   // ---------- Loop: capped frame rate, fully stopped while paused or hidden ----------

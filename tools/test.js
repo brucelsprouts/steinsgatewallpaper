@@ -578,7 +578,7 @@ test('rig: at its strongest nothing folds over or tears, and the shader finds ev
   }
 });
 
-// ---------- Schematics: the figures' lives, where they go and how they move (nothing is drawn without a screen) ----------
+// ---------- Schematics: the woven drawing, its lines and shapes, where they go and their lives (nothing is drawn without a screen) ----------
 
 function loadSchematic() {
   const ctx = { Math };
@@ -588,7 +588,7 @@ function loadSchematic() {
   return ctx;
 }
 
-// A field run at 30 fps from the start to `until` s, `each(t, field, Schematic)` called every half second.
+// A drawing run at 30 fps from the start to `until` s, `each(t, field, Schematic)` called every half second.
 const MAKISE_FOCUS = { x: 600, y: 790, rx: 720, ry: 800 };
 function runField(seed, until, each) {
   const { Kit, Schematic } = loadSchematic();
@@ -600,11 +600,16 @@ function runField(seed, until, each) {
   }
   return { field, Schematic };
 }
+const isLine = e => e.kind === 'line';
+// How far x, y lies from line l (design px).
+function offLine(l, x, y) {
+  const dx = l.x1 - l.x0, dy = l.y1 - l.y0, u = Math.max(0, Math.min(1, ((x - l.x0) * dx + (y - l.y0) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(l.x0 + dx * u - x, l.y0 + dy * u - y);
+}
 
-test('schematic: parts draw on one after another, from nothing to whole, then erase', () => {
-  const { Schematic: S } = loadSchematic();
-  const f = { born: 10, inT: 3, dies: 50, outT: 2 };
-  const at = t => { const [on, off] = S.phase(f, t); return [on, off]; };
+test('schematic: lines draw on along their length, and their shapes start as the pen passes them', () => {
+  const { Kit, Schematic: S } = loadSchematic();
+  const f = { born: 10, inT: 3, dies: 50, outT: 2 }, at = t => [...S.phase(f, t)];
   assert.deepStrictEqual(at(10), [0, 0]);
   assert.deepStrictEqual(at(13), [1, 0]);
   assert.deepStrictEqual(at(52), [1, 1]);
@@ -612,82 +617,186 @@ test('schematic: parts draw on one after another, from nothing to whole, then er
     for (let i = 0; i < n; i++) {
       assert.strictEqual(S.stagger(0, i, n), 0);
       assert.strictEqual(S.stagger(1, i, n), 1);
-      for (let u = 0, prev = 0; u <= 1; u += 0.05) { const v = S.stagger(u, i, n); assert.ok(v >= prev); prev = v; }
       if (i) assert.ok(S.stagger(0.3, i, n) <= S.stagger(0.3, i - 1, n), 'a later part ran ahead of an earlier one');
     }
   }
+  for (let i = 0; i <= 20; i++) {
+    assert.ok(Math.abs(Kit.ease.inOut(S.reach(i / 20)) - i / 20) < 1e-9, `the pen isn't ${i / 20} of the way along when it should be`);
+  }
+  const { field } = runField(3, 120);
+  for (const e of field.items) {
+    if (isLine(e) || e.leaving) continue;
+    const L = e.deps[0], due = L.born + L.inT * S.reach(e.u);
+    assert.ok(e.born >= due && e.born <= due + 0.5, `a ${e.kind} started ${(e.born - due).toFixed(2)} s from when the pen passed it`);
+  }
 });
 
-test('schematic: always about the same number of figures, and always one drawing on or off', () => {
+test('schematic: every shape lies on its lines, and goes when any of them goes', () => {
+  let shapes = 0;
+  runField(4, 600, (t, field) => {
+    for (const e of field.items) {
+      if (isLine(e)) continue;
+      shapes++;
+      const L = e.deps[0], on = [[e.x, e.y, L]];
+      if (e.kind === 'link') on.push([e.x1, e.y1, e.deps[1]]);
+      else if (e.deps[1]) on.push([e.x, e.y, e.deps[1]]);
+      if (e.kind === 'diamond') e.corners.forEach(([x, y], i) => on.push([x, y, e.deps[i % 2]]));
+      if (e.n && e.ux != null) { const gap = e.step || e.gap; on.push([e.x + e.ux * gap * (e.n - 1), e.y + e.uy * gap * (e.n - 1), L]); }
+      for (const [x, y, l] of on) assert.ok(offLine(l, x, y) < 0.5, `a ${e.kind} ${offLine(l, x, y).toFixed(1)} px off its line`);
+      if (!e.leaving) for (const d of e.deps) assert.ok(field.items.includes(d) && !d.leaving, `a ${e.kind} stayed after its line went, at ${t}s`);
+    }
+  });
+  assert.ok(shapes > 1000, `only ${shapes} shapes looked at`);
+});
+
+test('schematic: it grows like a crystal: off lines, square to them or at 60°, in formations at many angles, not a grid', () => {
+  let grown = 0, worst = 0;
+  const all = new Array(18).fill(0); // line length by its angle, modulo 90°, in 5° steps
+  runField(6, 900, (t, field) => {
+    for (const l of field.items) {
+      if (!isLine(l) || !l.from || l.checked) continue;
+      l.checked = true;
+      grown++;
+      assert.ok(offLine(l.from, l.x0, l.y0) < 0.5, 'a growth set off from nowhere');
+      const cos = Math.abs(l.ux * l.from.ux + l.uy * l.from.uy);
+      assert.ok(cos < 1e-6 || Math.abs(cos - 0.5) < 1e-6, `a growth at ${(Math.acos(cos) * 180 / Math.PI).toFixed(0)}° to its line`);
+    }
+    if (t < 30 || t % 30) return;
+    const now = new Array(18).fill(0);
+    for (const l of field.lines) now[Math.floor(((Math.atan2(l.uy, l.ux) * 180 / Math.PI) % 90 + 90) % 90 / 5)] += l.len;
+    const sum = now.reduce((s, v) => s + v, 0);
+    worst = Math.max(worst, Math.max(...now) / sum);
+    now.forEach((v, i) => { all[i] += v; });
+  });
+  const sum = all.reduce((s, v) => s + v, 0), shares = all.map(v => v / sum);
+  assert.ok(grown > 200, `only ${grown} growths`);
+  assert.ok(worst < 0.35, `${(worst * 100).toFixed(0)}% of the line at one angle at once: a grid`);
+  assert.ok(Math.max(...shares) < 0.25 && shares.filter(v => v > 0.02).length >= 10, 'over time, the lines keep to too few angles');
+});
+
+test('schematic: lines apart, some broken: none alongside another its way, and some long ones in pieces', () => {
+  let close = 0, broken = 0, long = 0;
+  runField(10, 900, (t, field) => {
+    if (t % 30) return;
+    const ls = field.lines;
+    for (let i = 0; i < ls.length; i++) {
+      for (let j = i + 1; j < ls.length; j++) {
+        const a = ls[i], b = ls[j];
+        if (Math.abs(a.ux * b.uy - a.uy * b.ux) >= 0.03) continue;
+        if (Math.min(offLine(a, b.x0, b.y0), offLine(a, b.x1, b.y1), offLine(b, a.x0, a.y0), offLine(b, a.x1, a.y1)) < 40) close++;
+      }
+    }
+    for (const l of ls) if (l.len > 350) { long++; if (l.gaps.length) broken++; }
+  });
+  assert.ok(close <= 3, `${close} times a line lay alongside another its way`);
+  assert.ok(broken > long * 0.15 && broken < long * 0.55, `${broken} of ${long} long lines broken`);
+});
+
+test('schematic: always the same number of growths, and always something drawing on or off', () => {
   let quiet = 0, longest = 0;
   runField(5, 3600, (t, field, S) => {
-    // On screen, counting those erasing themselves while their replacements draw on; and
-    // never more than COUNT staying.
-    assert.ok(field.figs.length >= S.COUNT - 1 && field.figs.length <= S.COUNT + 5, `${field.figs.length} figures at ${t}s`);
-    assert.ok(field.staying(field.figs, t) <= S.COUNT, `${field.staying(field.figs, t)} figures staying at ${t}s`);
-    assert.ok(field.staying(field.rules, t) <= S.RULES, `${field.rules.length} long lines at ${t}s`);
-    const busy = field.figs.some(f => { const [on, off] = S.phase(f, t); return on < 1 || off > 0; });
+    const n = field.staying();
+    assert.ok(n >= S.COUNT - 1 && n <= S.COUNT, `${n} growths at ${t}s`);
+    const busy = field.items.some(e => { const [on, off] = S.phase(e, t); return (on > 0 && on < 1) || (off > 0 && off < 1); });
     quiet = busy ? 0 : quiet + 0.5;
     longest = Math.max(longest, quiet);
   });
-  assert.ok(longest <= 6, `nothing drew on or off for ${longest}s`);
+  assert.ok(longest <= 8, `nothing drew on or off for ${longest}s`);
 });
 
-test('schematic: figures spread out, never piled up and leaving no bare patch', () => {
-  let worst = 0;
-  runField(7, 1800, (t, field) => {
-    if (t % 10) return;
-    // A new figure may draw itself on where an old one is erasing; those staying never pile up.
-    const figs = field.figs.filter(f => t < f.dies);
-    for (let i = 0; i < figs.length; i++) {
-      for (let j = i + 1; j < figs.length; j++) {
-        const a = figs[i], b = figs[j];
-        assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > (a.room + b.room) * 0.45, `${a.kind} and ${b.kind} piled up at ${t}s`);
+test('schematic: spread evenly: no dense blob, no bare patch, and no shapes in the clear middle', () => {
+  const blocks = [];
+  runField(7, 1800, (t, field, S) => {
+    if (t < 60 || t % 20) return;
+    // The line in each block of the frame (256 x 240 px), against the average, leaving out
+    // the blocks in the pool of dark round the centrepiece.
+    const ink = new Array(60).fill(0);
+    for (const e of field.items) {
+      if (e.leaving) continue;
+      for (const [x, y] of S.KINDS[e.kind].pts(e)) {
+        if (x < 0 || x >= 2560 || y < 0 || y >= 1440) continue;
+        ink[Math.floor(y / 240) * 10 + Math.floor(x / 256)] += e.k;
       }
     }
-    // The barest place in the open frame: inside the vignetted edges, and outside the pool
-    // of dark around the centrepiece (inside three quarters of it, it still dims the
-    // figures by a seventh or more, and Makise covers much of it).
-    for (let y = 240; y <= 1200; y += 120) {
-      for (let x = 240; x <= 2320; x += 120) {
-        if (Math.hypot((x - 600) / 540, (y - 790) / 600) < 1) continue;
-        worst = Math.max(worst, Math.min(...figs.map(f => Math.hypot(x - f.x, y - f.y) - f.room)));
+    const open = ink.filter((v, i) => Math.hypot(((i % 10) * 256 + 128 - 600) / 720, (Math.floor(i / 10) * 240 + 120 - 790) / 800) > 0.75);
+    const mean = open.reduce((s, v) => s + v, 0) / open.length;
+    for (const v of open) blocks.push(v / mean);
+    for (const e of field.items) {
+      if (isLine(e) || e.leaving) continue;
+      assert.ok(Math.hypot((e.x - 600) / 720, (e.y - 790) / 800) > 0.25, `a ${e.kind} in the clear middle at ${t}s`);
+    }
+  });
+  // A long line coming or going moves a block a long way, so a block may be nearly bare
+  // for a moment, but seldom, and never much more than three times as full as the rest.
+  blocks.sort((a, b) => a - b);
+  const share = blocks.filter(v => v < 0.15).length / blocks.length, p5 = blocks[Math.floor(blocks.length * 0.05)];
+  assert.ok(blocks[blocks.length - 1] < 3.5, `a block ${blocks[blocks.length - 1].toFixed(2)} times as full as the average`);
+  assert.ok(share < 0.02 && p5 > 0.25, `blocks nearly bare ${(share * 100).toFixed(1)}% of the time, the barest 5% under ${p5.toFixed(2)} of the average`);
+});
+
+test('schematic: few small shapes, lines first: no gears, no diamonds side by side, three dials at most', () => {
+  const { Schematic } = loadSchematic();
+  assert.ok(!Schematic.SHAPES.some(k => /gear|train/i.test(k)), 'gears among the shapes');
+  runField(8, 1200, (t, field, S) => {
+    const staying = field.items.filter(e => !e.leaving), shapes = staying.filter(e => !isLine(e));
+    const diamonds = shapes.filter(e => e.kind === 'diamond');
+    for (let i = 0; i < diamonds.length; i++) {
+      for (let j = i + 1; j < diamonds.length; j++) {
+        assert.ok(Math.hypot(diamonds[i].x - diamonds[j].x, diamonds[i].y - diamonds[j].y) >= 300, `diamonds side by side at ${t}s`);
+      }
+    }
+    assert.ok(shapes.filter(e => e.kind === 'dial').length <= 3, `more than three dials at ${t}s`);
+    for (const e of shapes) if (e.kind === 'ring') assert.ok(Math.max(...e.radii) <= 80, 'a big ring');
+    const ink = list => list.reduce((s, e) => s + S.KINDS[e.kind].pts(e).length * e.k, 0);
+    assert.ok(ink(staying.filter(isLine)) >= 2 * ink(shapes), `nearly as much shape as line at ${t}s`);
+  });
+});
+
+test('schematic: glints run only along lines, turning only where lines cross', () => {
+  let seen = 0, turned = 0;
+  runField(9, 900, (t, field) => {
+    for (const gl of field.glints) {
+      seen++;
+      assert.ok(field.items.includes(gl.L) && isLine(gl.L) && !gl.L.leaving, 'a glint off any line');
+      assert.ok(gl.u >= 0 && gl.u <= 1, 'a glint beyond its line');
+      for (let i = 1; i < gl.path.length; i++) {
+        const { x, y } = gl.path[i];
+        assert.ok(offLine(gl.path[i - 1].L, x, y) < 0.5 && offLine(gl.path[i].L, x, y) < 0.5, 'a glint turned away from a crossing');
+        turned++;
       }
     }
   });
-  assert.ok(worst < 420, `a bare patch ${worst.toFixed(0)} px from any figure`);
+  assert.ok(seen > 50 && turned > 0, `${seen} glints seen, ${turned} turns`);
 });
 
-test('schematic: each figure moves its own way, and the cursor moves each by its own depth', () => {
-  const { field } = runField(9, 60);
-  const figs = field.figs.slice(0, 10);
-  const moves = figs.map(f => { const a = field.where(f, 60), b = field.where(f, 75); return [b.x - a.x, b.y - a.y]; });
-  const spread = Math.max(...moves.map(m => Math.hypot(m[0] - moves[0][0], m[1] - moves[0][1])));
-  assert.ok(spread > 5, `the figures moved together, within ${spread.toFixed(1)} px of each other`);
-  const still = figs.map(f => field.where(f, 60).x);
-  field.cam.x = 1;
-  const pushed = figs.map((f, i) => field.where(f, 60).x - still[i]);
-  assert.ok(pushed.every(d => d > 0), 'a figure moved against the cursor');
-  assert.ok(Math.max(...pushed) - Math.min(...pushed) > 10, 'the cursor moved every figure the same');
-});
-
-test('schematic: a worldline shift erases them all quickly and draws a fresh set', () => {
+test('schematic: a worldline shift wipes the drawing outward from the centrepiece and grows a new one', () => {
   const { Kit, Schematic: S } = loadSchematic();
   const field = new S.Field(Kit.rng(11));
   field.keepClear(MAKISE_FOCUS);
   let t = 0;
   for (; t < 100; t += 1 / 30) field.update(t);
-  const before = new Set(field.figs);
+  const before = new Set(field.items);
   field.shift(t);
+  // Wiped outward: shapes near the centrepiece go before those far from it.
+  const when = near => {
+    const s = [...before].filter(e => !isLine(e) && near(Math.hypot(e.x - 600, e.y - 790)));
+    return s.reduce((a, e) => a + e.dies, 0) / s.length;
+  };
+  assert.ok(when(d => d < 700) < when(d => d > 1500), 'the far shapes went first');
   for (const end = t + 2; t < end; t += 1 / 30) field.update(t);
-  assert.ok(field.figs.every(f => !before.has(f)), 'figures from before the shift still there after 2 s');
-  for (const end = t + 8; t < end; t += 1 / 30) field.update(t);
-  assert.ok(field.figs.length >= S.COUNT - 2, `only ${field.figs.length} figures 10 s after the shift`);
+  assert.ok(field.items.every(e => !before.has(e)), 'lines or shapes from before the shift still there after 2 s');
+  for (const end = t + 6; t < end; t += 1 / 30) field.update(t);
+  assert.ok(field.staying() >= S.COUNT - 2, `only ${field.staying()} growths 8 s after the shift`);
 });
 
-test('schematic: no gears, and no rows of diamonds', () => {
-  const { Schematic: S } = loadSchematic();
-  for (const k of Object.keys(S.KINDS)) assert.ok(!/gear|train|diamond/i.test(k), `a ${k} among the figures`);
+test('schematic: the sheet is drawn afresh only when something starts to erase, and nothing long gone is kept', () => {
+  const { field } = runField(12, 900);
+  assert.ok(field.retired > 100, `only ${field.retired} growths erased in 15 minutes`);
+  assert.ok(field.redraws <= field.retired, `${field.redraws} redraws for ${field.retired} growths erased`);
+  // The lines a line grew from, back through those already erased: an erased one lets go.
+  const kept = new Set();
+  for (const l of field.lines) for (let p = l.from; p && !field.items.includes(p); p = p.from) kept.add(p);
+  assert.ok(kept.size <= field.lines.length, `${kept.size} erased lines still held`);
 });
 
 process.exitCode = failures ? 1 : 0;
