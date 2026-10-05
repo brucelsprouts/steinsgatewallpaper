@@ -14,6 +14,8 @@ const Scene = (() => {
   // What the scene darkens around the meter, so it keeps a pool of negative space.
   const FOCUS = { x: METER.cx, y: METER.cy, rx: 760, ry: 440 };
   const P = 42; // parallax travel in design px per unit of depth
+  // The astrolabe's face (design px: centre and radius): the schematics leave it room to read.
+  const ASTROLABE = { x: 2000, y: 560, r: 820 };
 
   function compose() {
     return [
@@ -26,9 +28,10 @@ const Scene = (() => {
           { type: 'dial', r: 780, hands: false, track: false, turn: -1 },
           { type: 'dial', r: 560, face: 'scale', hands: false, track: false, turn: 1 },
         ] }),
-      // The astrolabe: a giant dial whose rings step against each other.
-      new A({ x: 2000, y: 560, depth: -0.6, blur: 0.4, res: 1, alpha: 0.12, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
-        parts: [{ type: 'dial', r: 820, ring24: true }] }),
+      // The astrolabe: a giant dial whose rings step against each other, as bright as the
+      // half clock so it reads through the schematics drawn across it.
+      new A({ x: ASTROLABE.x, y: ASTROLABE.y, depth: -0.6, blur: 0.4, res: 1, alpha: 0.2, rx: 0.22, ry: -0.2, roll: 0.1, seed: 1, hands: 0.7,
+        parts: [{ type: 'dial', r: ASTROLABE.r, ring24: true }] }),
       new A({ x: 2330, y: 1330, depth: -0.45, blur: 0.35, res: 1, alpha: 0.1, rx: 0.15, ry: 0.2, seed: 2,
         beat: { period: 3, dur: 1.2, teeth: 0.25 },
         parts: [{ type: 'gear', pitch: 44, teeth: 48, spokes: 6, curved: true }] }),
@@ -171,5 +174,5 @@ const Scene = (() => {
     }
   }
 
-  return { Scene, METER, FOCUS };
+  return { Scene, METER, FOCUS, ASTROLABE };
 })();
