@@ -51,6 +51,7 @@
   // The schematics: one faint drafting drawing behind everything, slowly redrawing
   // itself. The setting (0-100, 50 as designed) scales how bright its lines are.
   const drafting = new Schematic.Field(Kit.rng(seed + 11));
+  drafting.quiet([Scene.ASTROLABE]); // it leaves the big clock room to read
   const schematic = () => Config.get('schematic') / 50;
   backdrop.cam = drafting.cam = scene.dust.cam;
   smoke.cam = light.cam = scene.dust.cam; // they drift with the near air
@@ -81,7 +82,9 @@
     smoke.build(view, f);
     backdrop.build(view, f);
     drafting.build(view);
-    drafting.keepClear(f);
+    // Round the meter the schematics keep a clear middle; round Makise they run on behind
+    // her, and only their shapes keep off her.
+    drafting.centre(f, makise ? { figure: Portrait.FIGURE } : { clear: true });
     // The screentone: around the middle of the centrepiece, and out into the empty strip
     // down the left edge.
     // The screentone and the halftone are Makise's alone.
@@ -148,15 +151,18 @@
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#040303';
     ctx.fillRect(0, 0, view.W, view.H);
-    // The schematics first: faint lines on the black, everything else drawn over them.
-    const sk = schematic(), m = scene.meterOffset(t);
-    if (sk > 0) drafting.draw(ctx, view, t, 0.2 * sk, m);
+    // The schematics: faint lines on the black, everything else drawn over them. Round the
+    // meter they go in first, so the pool of dark the scene keeps round it dims them too;
+    // round Makise they go in after it, so they fill the space round her.
+    const sk = schematic(), m = scene.meterOffset(t), makise = centre() === 'makise';
+    if (sk > 0 && !makise) drafting.draw(ctx, view, t, 0.2 * sk, m);
     scene.drawBehind(ctx, view, t, now);
+    if (sk > 0 && makise) drafting.draw(ctx, view, t, 0.2 * sk, m);
     // The backdrop and the screentone go in after the pool of dark the scene keeps around
     // the centrepiece, so they reach the whole frame and show in that pool; the backdrop
     // eases off around the centrepiece by itself. The screentone and the halftone on
     // Makise move with the centrepiece.
-    const tx = texture(), makise = centre() === 'makise';
+    const tx = texture();
     if (tx > 0) backdrop.draw(ctx, view, t, 0.045 * tx);
     if (makise) {
       if (tx > 0) screen.draw(ctx, view, 0.085 * tx, m);

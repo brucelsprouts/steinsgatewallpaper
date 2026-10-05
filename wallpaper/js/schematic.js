@@ -23,12 +23,13 @@ const Schematic = (() => {
   const LINE = '226,214,198'; // the lines' light: a pale warm white
   const W = 2560, H = 1440;   // the design frame
   const M = 140;              // the sheet's margin round the frame: the parallax never shows its edge
-  const COUNT = 60;           // growths at a time: a run of lines drawn as one stroke, and its shapes
+  const COUNT = 70;           // growths for a whole open frame: a run of lines drawn as one stroke, and its shapes
   const AGE = 100;            // s a growth stays at least, before it may be erased
   const RES = 0.5;            // the layer's px per design px: soft, and the same on any screen
   const P = 42;               // parallax travel in design px per unit of depth
   const DEPTH = -1;           // the drawing's depth: deep, with the backdrop
   const HOLE = 0.7;           // how far out the clear middle fades, in the centrepiece's radii
+  const QUIET = 0.5;          // how much line a quiet face takes, for what anywhere else does
   const CELL = 80;            // the density grid's cells (design px)
   const STEP = 16;            // how far apart the density samples lie along a stroke (design px)
   const TAIL = 110;           // a glint's length (design px)
@@ -317,7 +318,11 @@ const Schematic = (() => {
       this.retire = null;   // when the next one goes
       this.nextGlint = null;
       this.rush = false;    // growing a fresh drawing after a worldline shift
-      this.clear = null;    // the centrepiece's pool of negative space
+      this.focus = null;    // the middle of the centrepiece, where a shift's wipe starts
+      this.clear = null;    // the centrepiece's pool of negative space, if it's kept clear
+      this.figure = [];     // ellipses Makise covers: no shapes go there
+      this.faces = [];      // faces the drawing leaves room to read
+      this.count = COUNT;   // growths at a time, for how much of the frame is open
       this.vary = Math.floor(random() * 1e4);
       this.ink = new Float32Array(COLS * ROWS); // the line in each cell (px, times brightness)
       this.T = new Float32Array(COLS * ROWS);   // what each cell should hold, relative to the rest
@@ -346,27 +351,54 @@ const Schematic = (() => {
       g.fillRect(0, 0, 128, 128);
     }
 
-    // `focus`: the centrepiece's pool of negative space (design px: centre and radii). No
-    // shapes go in its core, less line goes near it, and the drawing fades out toward its
-    // middle.
-    keepClear(focus) {
-      this.clear = { x: focus.x, y: focus.y, rx: focus.rx, ry: focus.ry };
+    // The centrepiece. A shift wipes the drawing outward from the middle of `focus`, its pool
+    // of negative space (design px: centre and radii). With `clear` (the meter), no shapes
+    // go in its core, less line goes near it and the drawing fades out toward its middle.
+    // Without (Makise), the drawing runs on behind her, and only shapes keep off `figure`,
+    // the ellipses she covers, where she'd hide them.
+    centre(focus, { clear = false, figure = [] } = {}) {
+      this.focus = { x: focus.x, y: focus.y };
+      this.clear = clear ? { x: focus.x, y: focus.y, rx: focus.rx, ry: focus.ry } : null;
+      this.figure = figure;
       this.target();
     }
 
-    // What each cell should hold, relative to the rest: nothing in the centrepiece's core,
-    // rising to all of it a little way out, and a little more or less here and there.
+    // Faces the drawing leaves room to read (design px: centres and radii): it grows thinner
+    // over them, and no shapes go on them.
+    quiet(faces) {
+      this.faces = faces;
+      this.target();
+    }
+
+    // Whether x, y lies behind Makise.
+    hidden(x, y) { return this.figure.some(f => ((x - f.x) / f.rx) ** 2 + ((y - f.y) / f.ry) ** 2 < 1); }
+
+    // How far x, y lies within a quiet face: 1 well inside, easing to 0 at its rim.
+    inFace(x, y) {
+      let k = 0;
+      for (const f of this.faces) k = Math.max(k, 1 - smooth(0.8, 1, Math.hypot(x - f.x, y - f.y) / f.r));
+      return k;
+    }
+
+    // What each cell should hold, relative to the rest: nothing in the centrepiece's core
+    // if it's kept clear, rising to all of it a little way out; less over a quiet face; and
+    // a little more or less here and there. How many growths there are follows how much of
+    // the frame is open, so the drawing is as full wherever it goes.
     target() {
       const c = this.clear;
+      let open = 0, all = 0;
       this.open = [];
       for (let j = 0; j < ROWS; j++) {
         for (let i = 0; i < COLS; i++) {
           const x = (i + 0.5) * CELL - M, y = (j + 0.5) * CELL - M, n = j * COLS + i;
-          const d = c ? Math.hypot((x - c.x) / c.rx, (y - c.y) / c.ry) : 9;
-          this.T[n] = smooth(0.3, 0.75, d) * (0.75 + 0.5 * fbm2(x / 700, y / 700, this.vary, 3));
-          if (inFrame(x, y) && this.T[n] > 0.05) this.open.push(n);
+          const d = c ? Math.hypot((x - c.x) / c.rx, (y - c.y) / c.ry) : 9, v = 0.75 + 0.5 * fbm2(x / 700, y / 700, this.vary, 3);
+          this.T[n] = smooth(0.3, 0.75, d) * (1 - (1 - QUIET) * this.inFace(x, y)) * v;
+          if (!inFrame(x, y)) continue;
+          all += v;
+          if (this.T[n] > 0.05) { this.open.push(n); open += this.T[n]; }
         }
       }
+      this.count = Math.max(1, Math.round(COUNT * open / all));
     }
 
     cell(x, y) {
@@ -402,11 +434,11 @@ const Schematic = (() => {
     }
 
     // How much room there is for a shape at x, y, from 0 (none) to 1: none in the clear
-    // core, less where it's full, and in the right third, where the clockwork is busiest,
-    // half as much.
+    // core, behind Makise or on a quiet face; less where it's full; and in the right third,
+    // where the clockwork is busiest, half as much.
     room(x, y, lvl) {
       const c = this.cell(x, y);
-      if (c < 0 || this.T[c] < 0.05) return 0;
+      if (c < 0 || this.T[c] < 0.05 || this.hidden(x, y) || this.inFace(x, y) > 0) return 0;
       const full = lvl > 0 ? this.ink[c] / (this.T[c] * lvl * 1.2) : 0;
       return clamp(1 - full) * (1 - 0.5 * smooth(1500, 1900, x));
     }
@@ -440,10 +472,10 @@ const Schematic = (() => {
         this.retire = t + 4 + r() * 3;
       }
       // ...and something new grows where the drawing wants it.
-      if (t >= this.next && this.staying() < COUNT) {
+      if (t >= this.next && this.staying() < this.count) {
         this.add(this.growth(t));
         this.next = t + (this.rush ? 0.06 + r() * 0.06 : 0.5 + r() * 0.8);
-        if (this.staying() >= COUNT) this.rush = false;
+        if (this.staying() >= this.count) this.rush = false;
       }
       this.glide(t);
       this.settle(t);
@@ -456,7 +488,7 @@ const Schematic = (() => {
     // growth still being drawn.
     boot(t) {
       const r = this.r;
-      for (let i = 0; i < COUNT; i++) this.add(this.growth(t, (COUNT - 1 - i) * 5.5 + r() * 3 - 1.5));
+      for (let i = 0; i < this.count; i++) this.add(this.growth(t, (this.count - 1 - i) * 5.5 + r() * 3 - 1.5));
       this.next = t + 2;
       this.retire = t + 2 + r() * 3;
       this.nextGlint = t + 1 + r() * 2;
@@ -842,7 +874,7 @@ const Schematic = (() => {
     // A worldline shift: the drawing is wiped outward from the centrepiece within about a
     // second, lines from their nearest point to it, and a new one grows quickly.
     shift(t) {
-      const r = this.r, c = this.clear || { x: W / 2, y: H / 2 };
+      const r = this.r, c = this.focus || { x: W / 2, y: H / 2 };
       for (const e of this.items) {
         if (e.leaving) {
           // Erasing already: it hurries on from where it's got to.

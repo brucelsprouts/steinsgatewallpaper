@@ -32,6 +32,9 @@ const Portrait = (() => {
   const BOX = { cx: 600, bottom: 1490, maxW: 1150, maxH: 1260, feather: 0.06, fade: 0.22 };
   // The pool of negative space the scene keeps around it (design px: centre and radii).
   const FOCUS = { x: 600, y: 790, rx: 720, ry: 800 };
+  // Roughly where img/makise.webp covers the frame when she's home (design px: ellipses'
+  // centres and radii): her head and coat, and the foot of her coat.
+  const FIGURE = [{ x: 620, y: 680, rx: 230, ry: 440 }, { x: 615, y: 1150, rx: 330, ry: 130 }];
   // Grading toward the scene's light, and the colour of the light behind it. Kept dim, so
   // it sits in the scene's shadows rather than glowing out of them.
   const GRADE = {
@@ -269,5 +272,5 @@ const Portrait = (() => {
   }
 
   // The rest is for tools/rig.html, which shows the picture as the wallpaper does.
-  return { Portrait, BOX, FOCUS, SOURCES, GRADE, rigFor, fitOf, pose, graded, fetchImage };
+  return { Portrait, BOX, FOCUS, FIGURE, SOURCES, GRADE, rigFor, fitOf, pose, graded, fetchImage };
 })();

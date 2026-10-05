@@ -588,12 +588,25 @@ function loadSchematic() {
   return ctx;
 }
 
-// A drawing run at 30 fps from the start to `until` s, `each(t, field, Schematic)` called every half second.
+// The wallpaper's own: Makise's pool of negative space and the ellipses her figure covers
+// (portrait.js), the meter's pool and the big clock's face (scene.js).
 const MAKISE_FOCUS = { x: 600, y: 790, rx: 720, ry: 800 };
-function runField(seed, until, each) {
+const MAKISE_FIGURE = [{ x: 620, y: 680, rx: 230, ry: 440 }, { x: 615, y: 1150, rx: 330, ry: 130 }];
+const METER_FOCUS = { x: 560, y: 695, rx: 760, ry: 440 };
+const ASTROLABE = { x: 2000, y: 560, r: 820 };
+const behind = (x, y) => MAKISE_FIGURE.some(f => ((x - f.x) / f.rx) ** 2 + ((y - f.y) / f.ry) ** 2 < 1);
+const onFace = (x, y, k = 1) => Math.hypot(x - ASTROLABE.x, y - ASTROLABE.y) < ASTROLABE.r * k;
+// A field set up as the wallpaper sets it up, round Makise or the meter.
+function place(field, centre = 'makise') {
+  if (centre === 'makise') field.centre(MAKISE_FOCUS, { figure: MAKISE_FIGURE });
+  else field.centre(METER_FOCUS, { clear: true });
+  field.quiet([ASTROLABE]);
+  return field;
+}
+// A drawing run at 30 fps from the start to `until` s, `each(t, field, Schematic)` called every half second.
+function runField(seed, until, each, centre = 'makise') {
   const { Kit, Schematic } = loadSchematic();
-  const field = new Schematic.Field(Kit.rng(seed));
-  field.keepClear(MAKISE_FOCUS);
+  const field = place(new Schematic.Field(Kit.rng(seed)), centre);
   for (let k = 0; k <= until * 30; k++) {
     field.update(k / 30);
     if (k % 15 === 0 && each) each(k / 30, field, Schematic);
@@ -696,7 +709,7 @@ test('schematic: always the same number of growths, and always something drawing
   let quiet = 0, longest = 0;
   runField(5, 3600, (t, field, S) => {
     const n = field.staying();
-    assert.ok(n >= S.COUNT - 1 && n <= S.COUNT, `${n} growths at ${t}s`);
+    assert.ok(n >= field.count - 1 && n <= field.count, `${n} growths at ${t}s`);
     const busy = field.items.some(e => { const [on, off] = S.phase(e, t); return (on > 0 && on < 1) || (off > 0 && off < 1); });
     quiet = busy ? 0 : quiet + 0.5;
     longest = Math.max(longest, quiet);
@@ -704,12 +717,12 @@ test('schematic: always the same number of growths, and always something drawing
   assert.ok(longest <= 8, `nothing drew on or off for ${longest}s`);
 });
 
-test('schematic: spread evenly: no dense blob, no bare patch, and no shapes in the clear middle', () => {
-  const blocks = [];
+test('schematic: spread evenly round Makise and behind her, thinner over the big clock, with no shapes behind her or on it', () => {
+  const blocks = [], face = [];
   runField(7, 1800, (t, field, S) => {
     if (t < 60 || t % 20) return;
-    // The line in each block of the frame (256 x 240 px), against the average, leaving out
-    // the blocks in the pool of dark round the centrepiece.
+    // The line in each block of the frame (256 x 240 px), against the average of those off
+    // the clock's face.
     const ink = new Array(60).fill(0);
     for (const e of field.items) {
       if (e.leaving) continue;
@@ -718,12 +731,15 @@ test('schematic: spread evenly: no dense blob, no bare patch, and no shapes in t
         ink[Math.floor(y / 240) * 10 + Math.floor(x / 256)] += e.k;
       }
     }
-    const open = ink.filter((v, i) => Math.hypot(((i % 10) * 256 + 128 - 600) / 720, (Math.floor(i / 10) * 240 + 120 - 790) / 800) > 0.75);
+    const mid = i => [(i % 10) * 256 + 128, Math.floor(i / 10) * 240 + 120];
+    const open = ink.filter((v, i) => !onFace(...mid(i), 0.8)), on = ink.filter((v, i) => onFace(...mid(i), 0.6));
     const mean = open.reduce((s, v) => s + v, 0) / open.length;
     for (const v of open) blocks.push(v / mean);
+    face.push(on.reduce((s, v) => s + v, 0) / on.length / mean);
     for (const e of field.items) {
       if (isLine(e) || e.leaving) continue;
-      assert.ok(Math.hypot((e.x - 600) / 720, (e.y - 790) / 800) > 0.25, `a ${e.kind} in the clear middle at ${t}s`);
+      assert.ok(!behind(e.x, e.y), `a ${e.kind} behind Makise at ${t}s`);
+      assert.ok(!onFace(e.x, e.y), `a ${e.kind} on the clock's face at ${t}s`);
     }
   });
   // A long line coming or going moves a block a long way, so a block may be nearly bare
@@ -732,6 +748,28 @@ test('schematic: spread evenly: no dense blob, no bare patch, and no shapes in t
   const share = blocks.filter(v => v < 0.15).length / blocks.length, p5 = blocks[Math.floor(blocks.length * 0.05)];
   assert.ok(blocks[blocks.length - 1] < 3.5, `a block ${blocks[blocks.length - 1].toFixed(2)} times as full as the average`);
   assert.ok(share < 0.02 && p5 > 0.25, `blocks nearly bare ${(share * 100).toFixed(1)}% of the time, the barest 5% under ${p5.toFixed(2)} of the average`);
+  const held = face.reduce((s, v) => s + v, 0) / face.length;
+  assert.ok(held < 0.75, `the clock's face holds ${held.toFixed(2)} of the line anywhere else does`);
+});
+
+test('schematic: round the meter it keeps the clear middle, with no shapes in its core', () => {
+  let shapes = 0;
+  runField(13, 600, (t, field) => {
+    for (const e of field.items) {
+      if (isLine(e) || e.leaving) continue;
+      shapes++;
+      assert.ok(Math.hypot((e.x - 560) / 760, (e.y - 695) / 440) > 0.25, `a ${e.kind} in the clear middle at ${t}s`);
+    }
+  }, 'meter');
+  assert.ok(shapes > 500, `only ${shapes} shapes looked at`);
+});
+
+test('schematic: as many growths as the open frame holds: fewer where it is cleared or kept quiet', () => {
+  const { Kit, Schematic: S } = loadSchematic();
+  const open = new S.Field(Kit.rng(1)), makise = place(new S.Field(Kit.rng(1))), meter = place(new S.Field(Kit.rng(1)), 'meter');
+  assert.strictEqual(open.count, S.COUNT);
+  assert.ok(makise.count >= 52 && makise.count <= 60, `${makise.count} growths round Makise`);
+  assert.ok(meter.count >= 46 && meter.count <= 54 && meter.count < makise.count, `${meter.count} growths round the meter`);
 });
 
 test('schematic: few small shapes, lines first: no gears, no diamonds side by side, three dials at most', () => {
@@ -771,22 +809,20 @@ test('schematic: glints run only along lines, turning only where lines cross', (
 
 test('schematic: a worldline shift wipes the drawing outward from the centrepiece and grows a new one', () => {
   const { Kit, Schematic: S } = loadSchematic();
-  const field = new S.Field(Kit.rng(11));
-  field.keepClear(MAKISE_FOCUS);
+  const field = place(new S.Field(Kit.rng(11)));
   let t = 0;
   for (; t < 100; t += 1 / 30) field.update(t);
   const before = new Set(field.items);
   field.shift(t);
-  // Wiped outward: shapes near the centrepiece go before those far from it.
-  const when = near => {
-    const s = [...before].filter(e => !isLine(e) && near(Math.hypot(e.x - 600, e.y - 790)));
-    return s.reduce((a, e) => a + e.dies, 0) / s.length;
-  };
-  assert.ok(when(d => d < 700) < when(d => d > 1500), 'the far shapes went first');
+  // Wiped outward: the nearest third of the shapes to the centrepiece go before the
+  // farthest third.
+  const shapes = [...before].filter(e => !isLine(e)).sort((a, b) => Math.hypot(a.x - 600, a.y - 790) - Math.hypot(b.x - 600, b.y - 790));
+  const third = Math.floor(shapes.length / 3), when = list => list.reduce((a, e) => a + e.dies, 0) / list.length;
+  assert.ok(third >= 5 && when(shapes.slice(0, third)) < when(shapes.slice(-third)), 'the far shapes went first');
   for (const end = t + 2; t < end; t += 1 / 30) field.update(t);
   assert.ok(field.items.every(e => !before.has(e)), 'lines or shapes from before the shift still there after 2 s');
   for (const end = t + 6; t < end; t += 1 / 30) field.update(t);
-  assert.ok(field.staying() >= S.COUNT - 2, `only ${field.staying()} growths 8 s after the shift`);
+  assert.ok(field.staying() >= field.count - 2, `only ${field.staying()} growths 8 s after the shift`);
 });
 
 test('schematic: the sheet is drawn afresh only when something starts to erase, and nothing long gone is kept', () => {
