@@ -4,8 +4,9 @@
      (node tools/serve.js) and open http://localhost:5173/tools/rig.html. Save writes the rig
      beside the picture (wallpaper/img/makise-rig.js and its masks).
      Keys: B paint, E erase, S smooth, [ ] brush size, Shift+[ ] softness, 1-9 and 0
-     strength, Alt+click picks a strength up, M mask, Space play, F fit, G gust, K blink, W wander,
-     Up/Down another effect, Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo, Ctrl+S save. -->
+     strength, Alt+click picks a strength up, M mask, L a blink's eye or lid, Space play, F fit,
+     G gust, K blink, W wander, Up/Down another effect, Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo,
+     Ctrl+S save. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -133,7 +134,7 @@
       <button data-add="wave" title="Ripples running across it: hair, loose cloth">Waves</button>
       <button data-add="breathe" title="Rises and falls with each breath">Breathe</button>
       <button data-add="parallax" title="Shifts with the cursor, as if nearer or farther">Parallax</button>
-      <button data-add="blink" title="Shuts the eyes now and then: the lid comes down over what's painted">Blink</button>
+      <button data-add="blink" title="Shuts the eyes now and then: the lid you paint comes down over the eye you paint">Blink</button>
       <button data-add="hold" title="What must never bend">Hold still</button>
     </div>
   </aside>
@@ -183,7 +184,7 @@
     </div>
   </aside>
 </main>
-<footer>B paint · E erase · S smooth · [ ] size · 1–0 strength · Alt+click picks strength · M mask · Space play · F fit · G gust · K blink · W wander · wheel zoom · right-drag pan · Ctrl+Z undo · Ctrl+S save</footer>
+<footer>B paint · E erase · S smooth · [ ] size · 1–0 strength · Alt+click picks strength · M mask · L eye/lid · Space play · F fit · G gust · K blink · W wander · wheel zoom · right-drag pan · Ctrl+Z undo · Ctrl+S save</footer>
 <script src="../wallpaper/js/kit.js"></script>
 <script src="../wallpaper/js/rig.js"></script>
 <script src="../wallpaper/js/portrait.js"></script>
@@ -201,6 +202,7 @@ const ed = {
   img: null, src: null, crop: 1, W: 0, H: 0, Hs: 0, fit: 1, rigUrl: '',
   mw: 0, mh: 0, sh: 0,             // the masks' size, and how many of their rows are shown
   effects: [], sel: null, ids: 1,
+  part: 'eye',                      // which of a blink's masks the brush paints: 'eye' or 'lid'
   maps: [],                         // the masks as the GPU has them: RGBA bytes, three to each
   renderer: new Rig.Renderer(), motion: new Rig.Motion(),
   view: { k: 1, x: 0, y: 0 },       // screen px per picture px, and where its corner is
@@ -243,22 +245,41 @@ async function start() {
   requestAnimationFrame(frame);
 }
 
-// Each effect's mask out of the rig's PNGs, at the editor's size (the rows shown only).
+// Each effect's mask (and a blink's lid) out of the rig's PNGs, at the editor's size (the
+// rows shown only).
 function read(rig) {
   const pixels = (rig ? rig.images : []).map(img => {
     const c = Kit.canvas(ed.mw, ed.mh), cg = c.getContext('2d');
     cg.drawImage(img, 0, 0, ed.mw, ed.mh);
     return cg.getImageData(0, 0, ed.mw, ed.sh).data;
   });
+  const fill = (data, slot) => {
+    const px = slot && pixels[slot[0]];
+    if (px) for (let i = 0, c = slot[1]; i < data.length; i++) data[i] = px[i * 4 + c] / 255;
+    return data;
+  };
   const effects = rig ? rig.effects : [Rig.make('hold')];
   for (const e of effects) {
     e.id = ed.ids++;
-    e.data = new Float32Array(ed.mw * ed.sh);
-    const px = e.mask && pixels[e.mask[0]];
-    if (px) for (let i = 0, c = e.mask[1]; i < e.data.length; i++) e.data[i] = px[i * 4 + c] / 255;
+    e.data = fill(new Float32Array(ed.mw * ed.sh), e.mask);
+    if (e.kind === 'blink') e.lidPaint = { data: fill(new Float32Array(ed.mw * ed.sh), e.lid), mask: null, centre: null };
   }
   return effects;
 }
+
+// The masks: every effect has one (`data`, painted over the picture, and `mask`, where it
+// is packed), a blink a second for its lid (`lidPaint`, shaped the same).
+const layersOf = e => (e.lidPaint ? [e, e.lidPaint] : [e]);
+// The effect a mask belongs to.
+const owner = l => ed.effects.find(e => e === l || e.lidPaint === l) || null;
+// The mask the brush paints: the chosen effect's, or a blink's lid.
+const layer = () => (ed.sel && ed.part === 'lid' && ed.sel.lidPaint) || ed.sel;
+// What it's called, for messages.
+const layerName = l => { const e = owner(l); return e && e.lidPaint === l ? `${e.name}'s lid` : e && e.lidPaint ? `${e.name}'s eye` : e ? e.name : ''; };
+// How many masks the effects take, of the most a rig can have.
+const slotsUsed = (effects = ed.effects) => effects.reduce((n, e) => n + Rig.slots(e.kind), 0);
+// A swing's pivot or a blink's skin spot: the setting named, or undefined.
+const handle = e => e && KINDS[e.kind].point;
 
 // The picture as it's shown: as it is, or graded the way the wallpaper grades it.
 function picture() {
@@ -272,11 +293,16 @@ function picture() {
 const fitting = () => ({ size: [ed.W, ed.H * ed.crop], fade: ed.look === 'plain' ? 0 : Portrait.BOX.fade });
 
 // ---------- The masks on the GPU ----------
-// Every effect's mask packed into textures, three to each, in the order of the list.
+// Every mask packed into textures, three to each, in the order of the list (a blink's eye,
+// then its lid).
 function pack() {
-  const n = Math.max(1, Math.ceil(ed.effects.length / 3));
-  ed.maps = Array.from({ length: n }, () => ({ width: ed.mw, height: ed.sh, data: new Uint8Array(ed.mw * ed.sh * 4) }));
-  ed.effects.forEach((e, i) => { e.mask = [Math.floor(i / 3), i % 3]; bytes(e, 0, 0, ed.mw, ed.sh); });
+  ed.maps = Array.from({ length: Math.max(1, Math.ceil(slotsUsed() / 3)) }, () => ({ width: ed.mw, height: ed.sh, data: new Uint8Array(ed.mw * ed.sh * 4) }));
+  let n = 0;
+  for (const e of ed.effects) {
+    e.mask = [Math.floor(n / 3), n++ % 3];
+    if (e.lidPaint) e.lid = e.lidPaint.mask = [Math.floor(n / 3), n++ % 3];
+    for (const l of layersOf(e)) bytes(l, 0, 0, ed.mw, ed.sh);
+  }
   ed.upload = null; // they all go up together
 }
 // The list of effects changed: pack the masks again and hand everything over.
@@ -285,7 +311,7 @@ function rebuild() {
   ed.renderer.set(picture(), ed.maps, ed.effects, fitting());
   list();
 }
-// Part of an effect's mask into its texture's bytes ...
+// Part of a mask into its texture's bytes ...
 function bytes(e, x, y, w, h) {
   const d = ed.maps[e.mask[0]].data, c = e.mask[1], mw = ed.mw;
   for (let j = y; j < y + h; j++) {
@@ -295,7 +321,7 @@ function bytes(e, x, y, w, h) {
 }
 // ... and up to the GPU with the next frame.
 function write(e, x, y, w, h) {
-  if (!ed.effects.includes(e)) return;
+  if (!owner(e)) return;
   bytes(e, x, y, w, h);
   const u = ed.upload, m = e.mask[0];
   if (u && u.m === m) {
@@ -354,8 +380,13 @@ function draw() {
   g.fillStyle = BG;
   g.fillRect(0, 0, cv.width, cv.height);
   // The picture, moving (but still while a stroke is painted, so the brush lands where
-  // it's seen), with the chosen effect's mask over it, moving along with it.
-  const overlay = ed.mask && e ? { map: e.mask[0], channel: e.mask[1], color: KINDS[e.kind].color, alpha: 0.6 } : null;
+  // it's seen), with the chosen effect's mask over it, moving along with it: a blink's eye
+  // and, over that, its lid, the one being painted the stronger.
+  let overlay = null;
+  if (ed.mask && e) {
+    overlay = [{ map: e.mask[0], channel: e.mask[1], color: KINDS[e.kind].color, alpha: e.lidPaint && ed.part === 'lid' ? 0.3 : 0.6 }];
+    if (e.lidPaint) overlay.push({ map: e.lid[0], channel: e.lid[1], color: KINDS[e.kind].lid, alpha: ed.part === 'lid' ? 0.75 : 0.45 });
+  }
   const pic = ed.renderer.draw(ed.motion.values(ed.t, ed.effects), { still: !!ed.stroke, overlay });
   g.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y);
   g.imageSmoothingEnabled = v.k < 3;
@@ -367,9 +398,10 @@ function draw() {
   g.strokeStyle = 'rgba(255,255,255,0.08)';
   g.strokeRect(v.x - 0.5, v.y - 0.5, ed.W * v.k + 1, ed.Hs * v.k + 1);
   if (e && e.kind === 'swing') pivot(e);
+  if (e && e.kind === 'blink') skin(e);
   if (e && (e.kind === 'wave' || e.kind === 'breathe' || e.kind === 'blink')) arrow(e);
   // The brush.
-  if (ed.mouse && e && !ed.pan && !ed.drag && !nearPivot(ed.mouse)) {
+  if (ed.mouse && e && !ed.pan && !ed.drag && !nearHandle(ed.mouse)) {
     const [mx, my] = ed.mouse, r = ed.brush.size / 2 * v.k;
     g.strokeStyle = 'rgba(0,0,0,0.6)';
     g.lineWidth = 3;
@@ -415,6 +447,18 @@ function pivot(e) {
   g.beginPath(); g.arc(px, py, 9, 0, Math.PI * 2); g.moveTo(px - 13, py); g.lineTo(px + 13, py); g.moveTo(px, py - 13); g.lineTo(px, py + 13); g.stroke();
   g.lineWidth = 1;
 }
+// A blink's skin spot: where the shut lid takes its colour from, shown in that colour.
+function skin(e) {
+  const [x, y] = toScreen(e.skin[0], e.skin[1]);
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = `rgb(${KINDS.blink.color})`;
+  g.lineWidth = 2;
+  g.beginPath(); g.arc(x, y, 8, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.moveTo(x - 14, y); g.lineTo(x - 9, y); g.moveTo(x + 9, y); g.lineTo(x + 14, y);
+  g.moveTo(x, y - 14); g.lineTo(x, y - 9); g.moveTo(x, y + 9); g.lineTo(x, y + 14); g.stroke();
+  g.lineWidth = 1;
+}
 function arrow(e) {
   const [cx, cy] = toScreen(...centre(e)), a = e.dir * Math.PI / 180, L = 46;
   const x1 = cx + Math.cos(a) * L, y1 = cy + Math.sin(a) * L;
@@ -429,10 +473,11 @@ function arrow(e) {
   }
   g.lineWidth = 1;
 }
-function nearPivot(m) {
-  const e = ed.sel;
-  if (!m || !e || e.kind !== 'swing') return false;
-  const [px, py] = toScreen(e.pivot[0], e.pivot[1]);
+// Whether the pointer is on the chosen effect's pivot or skin spot, to drag it.
+function nearHandle(m) {
+  const e = ed.sel, k = handle(e);
+  if (!m || !k) return false;
+  const [px, py] = toScreen(e[k][0], e[k][1]);
   return Math.hypot(m[0] - px, m[1] - py) < 14;
 }
 
@@ -442,7 +487,7 @@ const sm = u => u * u * (3 - 2 * u);
 const tex = (x, y) => [x * ed.mw / ed.W, y * ed.sh / (ed.H * ed.crop)];
 
 function strokeStart(x, y) {
-  const e = ed.sel;
+  const e = layer();
   ed.stroke = { e, base: e.data.slice(), cov: new Float32Array(e.data.length), box: null, last: [x, y] };
   dab(x, y);
 }
@@ -537,14 +582,14 @@ function put(e, x, y, w, h, src) {
 }
 // The whole mask at once: fill, clear, invert or smooth.
 function whole(fn, what) {
-  const e = ed.sel;
+  const e = layer();
   if (!e) return;
   const before = e.data.slice();
   fn(e.data);
   put(e, 0, 0, ed.mw, ed.sh, e.data.slice());
   record({ type: 'mask', e, x: 0, y: 0, w: ed.mw, h: ed.sh, before, after: e.data.slice() });
   dirty();
-  say(`${what} ${e.name}`);
+  say(`${what} ${layerName(e)}`);
 }
 $('#fill').onclick = () => whole(d => d.fill(ed.brush.strength), 'Filled');
 $('#clear').onclick = () => whole(d => d.fill(0), 'Cleared');
@@ -565,7 +610,9 @@ function history() {
 function apply(entry, back) {
   if (entry.type === 'mask') {
     put(entry.e, entry.x, entry.y, entry.w, entry.h, back ? entry.before : entry.after);
-    select(entry.e);
+    const e = owner(entry.e);
+    if (e && e.lidPaint) ed.part = e.lidPaint === entry.e ? 'lid' : 'eye';
+    select(e);
   } else if (entry.type === 'param') {
     entry.e[entry.key] = structuredClone(back ? entry.before : entry.after);
     select(entry.e);
@@ -602,7 +649,7 @@ cv.addEventListener('pointerdown', ev => {
   if (ev.button === 1 || ev.button === 2) { ed.pan = { m, x: ed.view.x, y: ed.view.y }; return cursor(); }
   if (ev.button !== 0 || !ed.sel) return;
   const [x, y] = toPic(...m);
-  if (nearPivot(m)) { ed.drag = { e: ed.sel, before: ed.sel.pivot.slice() }; return cursor(); }
+  if (nearHandle(m)) { const k = handle(ed.sel); ed.drag = { e: ed.sel, key: k, before: ed.sel[k].slice() }; return cursor(); }
   if (ev.altKey) return pick(x, y);
   strokeStart(x, y);
 });
@@ -612,7 +659,7 @@ cv.addEventListener('pointermove', ev => {
   if (ed.pan) { ed.view.x = ed.pan.x + m[0] - ed.pan.m[0]; ed.view.y = ed.pan.y + m[1] - ed.pan.m[1]; return; }
   const [x, y] = toPic(...m);
   if (ed.drag) {
-    const pv = ed.drag.e.pivot = [Math.round(clamp(x, 0, ed.W)), Math.round(clamp(y, 0, ed.Hs))];
+    const pv = ed.drag.e[ed.drag.key] = [Math.round(clamp(x, 0, ed.W)), Math.round(clamp(y, 0, ed.Hs))];
     if ($('#pivot')) $('#pivot').value = `${pv[0]}, ${pv[1]} px`;
     dirty();
     return;
@@ -625,7 +672,7 @@ const up = () => {
   if (ed.drag) {
     const d = ed.drag;
     ed.drag = null;
-    if (d.before.join() !== d.e.pivot.join()) record({ type: 'param', e: d.e, key: 'pivot', before: d.before, after: d.e.pivot.slice() });
+    if (d.before.join() !== d.e[d.key].join()) record({ type: 'param', e: d.e, key: d.key, before: d.before, after: d.e[d.key].slice() });
   }
   ed.pan = null;
   strokeEnd();
@@ -643,15 +690,15 @@ cv.addEventListener('wheel', ev => {
   v.k = k;
 }, { passive: false });
 function cursor() {
-  cv.className = ed.pan ? 'pan' : ed.drag || nearPivot(ed.mouse) ? 'pivot' : ed.sel ? 'paint' : '';
+  cv.className = ed.pan ? 'pan' : ed.drag || nearHandle(ed.mouse) ? 'pivot' : ed.sel ? 'paint' : '';
 }
 function readout(x, y) {
-  const e = ed.sel, inside = x >= 0 && y >= 0 && x < ed.W && y < ed.Hs;
+  const e = layer(), inside = x >= 0 && y >= 0 && x < ed.W && y < ed.Hs;
   if (!inside) { $('#readout').textContent = ''; return; }
   let text = `${Math.round(x)}, ${Math.round(y)} px`;
   if (e) {
     const [i, j] = tex(x, y);
-    text = `${e.name} ${Math.round(e.data[Math.min(ed.sh - 1, j | 0) * ed.mw + Math.min(ed.mw - 1, i | 0)] * 100)}% · ${text}`;
+    text = `${layerName(e)} ${Math.round(e.data[Math.min(ed.sh - 1, j | 0) * ed.mw + Math.min(ed.mw - 1, i | 0)] * 100)}% · ${text}`;
   }
   $('#readout').textContent = text;
 }
@@ -659,7 +706,7 @@ function readout(x, y) {
 function pick(x, y) {
   const [i, j] = tex(x, y);
   if (i < 0 || j < 0 || i >= ed.mw || j >= ed.sh) return;
-  ed.brush.strength = Math.round(ed.sel.data[(j | 0) * ed.mw + (i | 0)] * 100) / 100;
+  ed.brush.strength = Math.round(layer().data[(j | 0) * ed.mw + (i | 0)] * 100) / 100;
   brush();
   say(`Strength ${Math.round(ed.brush.strength * 100)}%`);
 }
@@ -681,7 +728,7 @@ function list() {
     box.appendChild(row);
   }
   for (const b of document.querySelectorAll('[data-add]')) {
-    b.disabled = ed.effects.length >= Rig.MAX || (b.dataset.add === 'hold' && ed.effects.some(e => e.kind === 'hold'));
+    b.disabled = slotsUsed() + Rig.slots(b.dataset.add) > Rig.MAX || (b.dataset.add === 'hold' && ed.effects.some(e => e.kind === 'hold'));
   }
 }
 function toggle(e) {
@@ -703,11 +750,15 @@ for (const b of document.querySelectorAll('[data-add]')) {
     const e = Rig.make(b.dataset.add);
     e.id = ed.ids++;
     e.data = new Float32Array(ed.mw * ed.sh);
+    if (e.kind === 'blink') e.lidPaint = { data: new Float32Array(ed.mw * ed.sh), mask: null, centre: null };
     const same = ed.effects.filter(o => o.kind === e.kind).length;
     if (same) e.name += ` ${same + 1}`;
-    if (e.pivot) e.pivot = [Math.round(ed.W / 2), Math.round(ed.Hs * 0.3)];
+    const k = handle(e);
+    if (k) e[k] = [Math.round(ed.W / 2), Math.round(ed.Hs * 0.3)];
+    if (e.kind === 'blink') ed.part = 'eye';
     relist([...ed.effects, e], e);
-    say(`Added ${e.name}: paint where it moves${e.pivot ? ', and drag its pivot to where it turns from' : ''}`);
+    say(e.kind === 'blink' ? `Added ${e.name}: paint each eye, then its lid (L), and drag the skin spot onto bare skin`
+      : `Added ${e.name}: paint where it moves${k ? ', and drag its pivot to where it turns from' : ''}`);
   };
 }
 
@@ -724,8 +775,10 @@ function props() {
     <div class="field"><span class="note">Name</span><input type="text" id="name" maxlength="40"></div>
     <label class="check"><input type="checkbox" id="on"> On</label>
     <label class="check" id="holdrow" title="Where Hold still is painted, this effect moves nothing"><input type="checkbox" id="hold"> Held areas stay still</label>
+    <div class="row" id="partrow" hidden><span class="note">Paint</span>
+      <div class="seg" id="part"><button data-v="eye" title="All of each eye, from the top of its upper lash to its lower lid: where the lid comes down over (L)">Eye</button><button data-v="lid" title="The upper lid inside it: its dark lash, a px or so beyond, which comes down until its lower edge reaches the bottom of the eye (L)">Lid</button></div></div>
     <div id="params"></div>
-    <div class="row" id="pivotrow" hidden><span class="note">Pivot</span><output id="pivot"></output><span class="note">drag it on the picture</span></div>
+    <div class="row" id="pivotrow" hidden><span class="note" id="pivotname">Pivot</span><output id="pivot"></output><span class="note" id="pivotnote">drag it on the picture</span></div>
     <div class="row"><button id="dup">Duplicate</button><button id="del">Delete</button></div>`;
   box.querySelector('h3').innerHTML = `<span></span><small>${K.label}</small>`;
   box.querySelector('h3 span').textContent = e.name;
@@ -743,10 +796,23 @@ function props() {
     $('#hold').checked = e.hold;
     $('#hold').onchange = () => { record({ type: 'param', e, key: 'hold', before: e.hold, after: !e.hold }); e.hold = !e.hold; dirty(); };
   }
+  if (e.lidPaint) {
+    $('#partrow').hidden = false;
+    for (const b of $('#part').children) b.setAttribute('aria-pressed', String(b.dataset.v === ed.part));
+    $('#part').onclick = ev => { const b = ev.target.closest('button'); if (b) part(b.dataset.v); };
+  }
   const params = $('#params');
   for (const [k, p] of Object.entries(K.params)) params.appendChild(slider(p, () => e[k], v => { e[k] = v; dirty(); }, (a, b) => record({ type: 'param', e, key: k, before: a, after: b })));
-  if (e.pivot) { $('#pivotrow').hidden = false; $('#pivot').value = `${e.pivot[0]}, ${e.pivot[1]} px`; }
-  $('#dup').disabled = ed.effects.length >= Rig.MAX || e.kind === 'hold';
+  const hk = handle(e);
+  if (hk) {
+    $('#pivotrow').hidden = false;
+    $('#pivot').value = `${e[hk][0]}, ${e[hk][1]} px`;
+    if (hk === 'skin') {
+      $('#pivotname').textContent = 'Skin';
+      $('#pivotnote').textContent = 'drag the spot onto bare skin: the shut lid takes its colour';
+    }
+  }
+  $('#dup').disabled = slotsUsed() + Rig.slots(e.kind) > Rig.MAX || e.kind === 'hold';
   $('#dup').onclick = () => {
     const c = { ...structuredClone({ ...e, data: null, centre: null }), id: ed.ids++, data: e.data.slice(), name: e.name + ' copy' };
     const i = ed.effects.indexOf(e);
@@ -757,6 +823,14 @@ function props() {
     relist(rest, rest[Math.min(i, rest.length - 1)] || null);
     say(`Deleted ${e.name} (Ctrl+Z brings it back)`);
   };
+}
+
+// Which of a blink's masks the brush paints: its eye or its lid.
+function part(v = ed.part === 'eye' ? 'lid' : 'eye') {
+  ed.part = v;
+  props();
+  if (ed.mouse) readout(...toPic(...ed.mouse));
+  if (ed.sel && ed.sel.lidPaint) say(`Painting ${layerName(layer())}`);
 }
 
 // A setting's slider and box. `commit(before, after)` once a change is done.
@@ -853,24 +927,27 @@ const round = v => +Number(v).toFixed(4);
 // that aren't shown left empty). `{ name: text or a PNG blob }`.
 async function files() {
   const name = ed.rigUrl.split('/').pop().replace(/\.js$/, ''), out = {}, maps = [];
-  for (let m = 0; m < Math.ceil(ed.effects.length / 3); m++) {
+  const layers = ed.effects.flatMap(layersOf);
+  for (let m = 0; m < Math.ceil(layers.length / 3); m++) {
     const c = Kit.canvas(ed.mw, ed.mh), cg = c.getContext('2d'), im = cg.createImageData(ed.mw, ed.mh);
     for (let i = 3; i < im.data.length; i += 4) im.data[i] = 255;
-    ed.effects.forEach((e, i) => {
-      if (Math.floor(i / 3) !== m) return;
-      for (let o = 0, ch = i % 3; o < e.data.length; o++) im.data[o * 4 + ch] = Math.round(e.data[o] * 255);
-    });
+    for (const l of layers) {
+      if (l.mask[0] !== m) continue;
+      for (let o = 0, ch = l.mask[1]; o < l.data.length; o++) im.data[o * 4 + ch] = Math.round(l.data[o] * 255);
+    }
     cg.putImageData(im, 0, 0);
     maps.push(`${name}-${m}.png`);
     out[maps[m]] = await new Promise(resolve => c.toBlob(resolve, 'image/png'));
   }
-  const effects = ed.effects.map((e, i) => {
+  const effects = ed.effects.map(e => {
     const d = { kind: e.kind, name: e.name };
     if (!e.on) d.on = false;
     if ('hold' in e) d.hold = e.hold;
-    d.mask = [Math.floor(i / 3), i % 3];
+    d.mask = e.mask.slice();
+    if (e.lidPaint) d.lid = e.lid.slice();
     for (const k of Object.keys(KINDS[e.kind].params)) d[k] = round(e[k]);
-    if (e.pivot) d.pivot = e.pivot.map(Math.round);
+    const k = handle(e);
+    if (k) d[k] = e[k].map(Math.round);
     return d;
   });
   out[`${name}.js`] = `// The rig that brings img/${ed.src.src.split('/').pop()} to life (see js/rig.js). Edit it in tools/rig.html.\n` +
@@ -944,6 +1021,7 @@ window.addEventListener('keydown', ev => {
   else if (k === ']' || k === '}') { if (ev.shiftKey) b.soft = clamp(b.soft + 0.1, 0, 1); else b.size = clamp(Math.round(b.size * 1.2), 2, 600); brush(); }
   else if (/^[0-9]$/.test(k)) { b.strength = k === '0' ? 1 : Number(k) / 10; brush(); say(`Strength ${Math.round(b.strength * 100)}%`); }
   else if (k === 'm') { ed.mask = !ed.mask; $('#showmask').checked = ed.mask; }
+  else if (k === 'l' && ed.sel && ed.sel.lidPaint) part();
   else if (k === ' ') play();
   else if (k === 'f') fitView();
   else if (k === 'g') $('#gust').click();

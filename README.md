@@ -91,7 +91,7 @@ silhouette) stands in. If no picture loads at all, the nixie meter takes its pla
   free toward the hem and still at the waist;
 - her **tie** sways a little from its knot;
 - she **blinks** now and then, at random, sometimes twice: for a frame or two her upper
-  lashes come down onto her lower lids;
+  lashes come down onto her lower lids, with her eyelids, shaded under her hair, above;
 - she **breathes**, softly: her head and shoulders rise a pixel or so;
 - her **head** sits a little nearer than the rest, so it shifts a touch more with the cursor.
 
@@ -103,12 +103,16 @@ picture and nothing has to be filled in behind. Each effect pushes the pixels of
 picture by as much as was painted for it, and the picture around a moving part stretches
 and squeezes to follow over the soft edge of what was painted. So nothing can open a gap,
 nothing is dragged along by a lock of hair, and what is painted **Hold still** stays put.
-The blink is done the way Wallpaper Engine's creators do it with Shake: what's painted
-over each eye takes its colour from further up, so the lid comes down over the eye.
+The blink is the one exception, and doesn't follow Wallpaper Engine (its creators blink
+with Shake, which looks each eye's colour up further up the picture; above Makise's eyes
+is her hair, so that pulled hair down into them). It has two masks: each eye, and inside
+it the upper lid, the dark lash. Blinking, the lid comes down over the eye, in each column
+until its lower edge reaches the bottom of the eye, and where it was or has passed shows
+her skin, taken from a spot on her cheek and shaded a little under her hair.
 
 The rig is `makise-rig.js` beside `makise.webp`, with the masks it names
 (`makise-rig-0.png` and so on, three masks to a picture: red, green and blue, at half
-the picture's size). A picture's rig is always `<its name>-rig.js` beside it, and it
+the picture's size; a blink has two). A picture's rig is always `<its name>-rig.js` beside it, and it
 says the size of the picture it was made for, so a rig never lands on another picture.
 
 #### The rig editor
@@ -132,11 +136,23 @@ and open <http://localhost:5173/tools/rig.html> (or **Rig editor** in the previe
     stronger in gusts, how far out of step neighbouring strands run);
   - **Breathe**: rises and falls with each breath (strength, direction, period);
   - **Parallax**: shifts with the cursor, as if nearer (or, with a depth below 0, farther);
-  - **Blink**: shuts the eyes now and then (travel, every so many seconds on average,
-    length, how often twice, direction). Paint each eye strongest just above its lower
-    lash, fading up over the lid, with a sharp edge under the lower lash: where it's
-    painted, the picture takes its colour from that much further up. It pays Hold still
-    no heed. Effects with the same timing blink together, so paint both eyes in one;
+  - **Blink**: shuts the eyes now and then (every so many seconds on average, length,
+    how often twice, direction, and shade: how much darker the shut lid is under her
+    hair). It has two masks, shown together, and **Eye** and **Lid** (or L) choose which
+    you paint:
+    - the **Eye** (yellow): all of each eye, from the top of its upper lash to its lower
+      lid (taking in the lower lid line, so the shut lash covers it), leaving out any hair
+      that hangs in front of it;
+    - the **Lid** (blue), inside it: the dark upper lash, a px or so beyond it.
+
+    Blinking, the lid comes down over the eye: in each column, until its lower edge
+    reaches the bottom of the eye there, so the shut lash follows the curve of the lower
+    lid. Where the lid was or has passed shows the colour at its **skin spot**, which you
+    drag onto bare skin (shaded warm, most at the top). The edges are where the masks are
+    half painted, so paint them firmly (the lid a little beyond the lash) rather than
+    faded. An eye can be up to about 90 px from the top of its lid to its bottom. It pays
+    Hold still no heed. Effects with the same timing blink together, so paint both eyes in
+    one;
   - **Hold still**: what must never bend. Sway, swing and waves leave it be; breathing
     and parallax still carry it, whole. Each effect can be told to ignore it.
 - Paint where the chosen effect works: brighter is stronger. **Paint**, **Erase** and
@@ -151,9 +167,9 @@ and open <http://localhost:5173/tools/rig.html> (or **Rig editor** in the previe
   **Download** gives you the files in a zip). Undo and redo go back 100 steps.
 
 Keys: B paint, E erase, S smooth, `[` `]` brush size (with Shift, softness), 1–9 and 0
-strength, Alt+click picks up the strength under the brush, M mask, Space play, F fit,
-G gust, K blink, W wander, ↑ ↓ another effect, wheel zoom, right-drag pan, Ctrl+Z undo,
-Ctrl+Shift+Z redo, Ctrl+S save.
+strength, Alt+click picks up the strength under the brush, M mask, L a blink's eye or lid,
+Space play, F fit, G gust, K blink, W wander, ↑ ↓ another effect, wheel zoom, right-drag
+pan, Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+S save.
 
 Soft edges matter: where a mask goes from moving to still, the picture between stretches,
 so the soft edge should be at least as wide as the part moves far (a hard edge folds
@@ -166,7 +182,8 @@ whole and holds still apart from floating.
 
 The starting rig was made by `python tools/rigmap.py` from the colours of the hair,
 jacket and tie inside regions placed (and, for the long lock and the left forearm, traced)
-by hand for this picture, and from each eye's lash lines measured column by column; then
+by hand for this picture, and from each eye's lash and the bottom of the eye, measured
+column by column; then
 the editor takes over. Running `rigmap.py` again starts the rig over (the hair masks
 shipped now were touched up in the editor since). For another picture, start a rig in
 the editor: it opens with just a **Hold still** to paint.

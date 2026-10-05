@@ -467,6 +467,18 @@ test('rig: a rig is checked and completed as it loads', () => {
   assert.strictEqual(swing.on, false);
   const many = Rig.normalize({ maps: [], effects: Array.from({ length: 20 }, () => ({ kind: 'wave' })) });
   assert.strictEqual(many.effects.length, Rig.MAX);
+  // A blink has two masks, its eye's and its lid's, and a skin spot; the most a rig holds is
+  // counted in masks.
+  const eyes = Rig.normalize({ maps: ['a.png', 'b.png'], effects: [
+    { kind: 'blink', mask: [0, 2], lid: [1, 0], skin: [40, 50] }, { kind: 'blink', mask: [0, 1], lid: [5, 0] },
+    ...Array.from({ length: 20 }, () => ({ kind: 'blink' })), { kind: 'wave' },
+  ] });
+  const [b1, b2] = eyes.effects;
+  assert.deepStrictEqual([[...b1.mask], [...b1.lid], [...b1.skin]], [[0, 2], [1, 0], [40, 50]]);
+  assert.strictEqual(b2.lid, null, 'a lid on a map it does not have');
+  assert.deepStrictEqual([...b2.skin], [0, 0]);
+  assert.strictEqual(eyes.effects.filter(e => e.kind === 'blink').length, Math.floor(Rig.MAX / 2));
+  assert.strictEqual(eyes.effects[eyes.effects.length - 1].kind, 'wave', 'and a one-mask effect in the last place');
 });
 
 test('rig: an effect switched off moves nothing', () => {
@@ -510,29 +522,72 @@ test('rig: she blinks now and then, at random, quickly, now and then twice', () 
   }
 });
 
-test('rig: shut, a blink shows what is above the eye; open, it moves nothing', () => {
-  const { Rig } = loadRig();
+// A picture to blink, `size` px square, made of the parts of a drawn eye at x 40..60: its
+// lash at rows 30..35, the eye below it down to row 55, skin elsewhere. Its colour at a
+// point says which part it is, one channel each: [lash, eye, skin, 1]. The blink's eye is
+// painted over rows 29..56 (the lash and a row either side, and the eye and a row below)
+// and its lid over rows 29..36, with a px of softness, the skin spot at (20, 80).
+function drawnEye(Rig) {
   const rig = Rig.normalize({ size: [100, 100], maps: ['a.png'], effects: [
-    { kind: 'hold', mask: [0, 0] }, { kind: 'blink', mask: [0, 1], amount: 20 },
+    { kind: 'hold', mask: [0, 0] }, { kind: 'blink', mask: [0, 1], lid: [0, 2], skin: [20, 80], shade: 0 },
   ] });
-  // An eye at x 40..60: its lash at y 30..35 lands on 50..55; the lid above stretches down.
-  const paint = (x, y) => (x < 40 || x > 60 ? 0 : y < 20 ? 0 : y < 50 ? (y - 20) / 30 : y <= 55 ? 1 : 0);
-  const mask = (m, q) => [1, paint(q[0], q[1]), 0]; // all of it held: a blink pays that no heed
+  const band = (v, a, b) => Math.min(1, Math.max(0, Math.min(v - a, b - v) + 0.5));
+  const at = (q, a, b) => Math.min(band(q[0], 40, 60), band(q[1], a, b));
+  // All of it held: a blink pays that no heed.
+  const mask = (m, q) => [1, at(q, 28.5, 56.5), at(q, 28.5, 36.5)];
+  const part = q => (q[0] >= 40 && q[0] <= 60 && q[1] >= 30 && q[1] < 36 ? 0 : q[0] >= 40 && q[0] <= 60 && q[1] >= 36 && q[1] < 56 ? 1 : 2);
+  const colour = q => { const c = [0, 0, 0, 1]; c[part(q)] = 1; return c; };
+  return { rig, mask, colour };
+}
+
+test('rig: shut, a blink brings its lid down to the bottom of the eye, with skin above; open, it changes nothing', () => {
+  const { Rig } = loadRig(), { rig, mask, colour } = drawnEye(Rig);
   const blink = rig.effects[1], m = new Rig.Motion();
   assert.ok(!('hold' in blink), 'a blink has no hold setting');
   m.blink(100);
   const shut = m.values(100 + blink.span * 0.42, rig.effects);
-  for (let y = 36; y <= 55; y++) {
-    const q = Rig.blinked(rig.effects, shut, mask, [50, y]);
-    assert.ok(q[1] <= 35.01 && Math.abs(q[0] - 50) < 1e-6, `${y} shows ${q[1].toFixed(2)}`);
+  assert.strictEqual(shut[8 + 2], 1, 'shut');
+  const at = y => Rig.blinked(rig.effects, shut, mask, [50.5, y + 0.5], colour);
+  // The lash (with a row either side, its soft edges) lands on the bottom of the eye:
+  // rows 49..56.
+  for (let y = 50; y <= 55; y++) assert.ok(at(y)[0] > 0.95, `row ${y}: lash ${at(y)[0].toFixed(2)}`);
+  // Above it, where the lash was and the eye it passed over, skin; nowhere any eye.
+  for (let y = 30; y <= 47; y++) assert.ok(at(y)[2] > 0.95, `row ${y}: skin ${at(y)[2].toFixed(2)}`);
+  for (let y = 25; y <= 55; y++) assert.ok(at(y)[1] < 0.02, `row ${y} shows the eye ${at(y)[1].toFixed(2)}`);
+  // Outside it, and above the lid, nothing changes.
+  for (const p of [[50.5, 60.5], [30.5, 50.5], [50.5, 10.5], [65.5, 40.5], [50.5, 27.5]]) {
+    assert.deepStrictEqual([...Rig.blinked(rig.effects, shut, mask, p, colour)], colour(p), `${p} changed`);
   }
-  for (const p of [[50, 60], [30, 50], [50, 10]]) assert.deepStrictEqual([...Rig.blinked(rig.effects, shut, mask, p)], p);
+  // Half shut, the lid is halfway down, with the eye below it.
+  m.blink(200);
+  let t = 200;
+  while (m.shut(t, blink) < 0.5) t += 0.0005;
+  const half = m.values(t, rig.effects), d = 20 * m.shut(t, blink);
+  const y0 = Math.ceil(30 + d), y1 = Math.floor(35 + d);
+  for (let y = y0; y <= y1; y++) assert.ok(Rig.blinked(rig.effects, half, mask, [50.5, y + 0.5], colour)[0] > 0.9, `half shut, row ${y} has no lash`);
+  for (let y = y1 + 2; y <= 55; y++) assert.ok(Rig.blinked(rig.effects, half, mask, [50.5, y + 0.5], colour)[1] > 0.9, `half shut, row ${y} hides the eye`);
   assert.deepStrictEqual([...Rig.push(rig.effects, shut, mask, [50, 50])], [0, 0], 'the push leaves it to the blink');
-  let t = 0;
-  while (Rig.shut(t, blink) > 0 || Math.abs(t - 100) < 1) t += 0.25;
-  assert.deepStrictEqual([...Rig.blinked(rig.effects, m.values(t, rig.effects), mask, [50, 50])], [50, 50], 'open, it moves nothing');
+  t = 0;
+  while (Rig.shut(t, blink) > 0 || Math.abs(t - 100) < 1 || Math.abs(t - 200) < 1) t += 0.25;
+  const open = m.values(t, rig.effects);
+  for (let y = 20; y <= 60; y += 2) {
+    assert.deepStrictEqual([...Rig.blinked(rig.effects, open, mask, [50.5, y + 0.5], colour)], colour([50.5, y + 0.5]), 'open, it changes nothing');
+  }
   const src = Rig.fragment(rig.effects, 1);
-  assert.ok(src.includes('l += a0.g * fx[2].xy') && src.includes('q -= l;') && !src.includes('d += a0.g'), 'the shader blinks after the push');
+  assert.ok(src.includes('vec4 blink1(vec2 q, vec4 c)') && src.includes('c = blink1(q, c);') && !src.includes('d += a0.g'), 'the shader blinks after the push');
+  assert.ok(src.includes('return vec2(a.g, a.b);'), 'reading its eye and lid');
+});
+
+test('rig: a shut lid takes the colour of its skin spot, shaded warm, most under the hair', () => {
+  const { Rig } = loadRig(), { rig, mask, colour } = drawnEye(Rig);
+  const blink = rig.effects[1], m = new Rig.Motion();
+  blink.shade = 0.3;
+  const skin = [0.9, 0.8, 0.7, 1], paint = q => (Math.hypot(q[0] - 20, q[1] - 80) < 4 ? skin : colour(q));
+  m.blink(100);
+  const shut = m.values(100 + blink.span * 0.42, rig.effects);
+  const top = Rig.blinked(rig.effects, shut, mask, [50.5, 30.5], paint), low = Rig.blinked(rig.effects, shut, mask, [50.5, 46.5], paint);
+  for (const c of [top, low]) assert.ok(c[0] < skin[0] && c[0] > 0.7 && c[2] < skin[2] && c[2] / c[0] < skin[2] / skin[0], `${c.map(v => v.toFixed(2))} is not the skin, shaded warm`);
+  assert.ok(top[1] < low[1] - 0.05, 'darker at its top');
 });
 
 test('rig: with Idle a spring drifts about on its own, slowly, each in its own time', () => {
@@ -564,11 +619,18 @@ test('rig: the rig shipped for makise.webp fits it, and its shader reads every m
     assert.ok(Math.abs(png.width / png.height / (size[0] / size[1]) - 1) < 0.02, `${m} is ${png.width}x${png.height}`);
   }
   const src = Rig.fragment(rig.effects, rig.maps.length);
-  for (const e of rig.effects) assert.ok(e.mask && src.includes(`a${e.mask[0]}.${'rgb'[e.mask[1]]}`), `${e.name} has no mask`);
+  rig.effects.forEach((e, i) => {
+    const used = slot => slot && (src.includes(`a${slot[0]}.${'rgb'[slot[1]]}`) || src.includes(`texture2D(m${slot[0]}, r / size).${'rgb'[slot[1]]}`));
+    assert.ok(used(e.mask), `${e.name} has no mask`);
+    if (e.kind === 'blink') assert.ok(used(e.lid) && src.includes(`c = blink${i}(q, c);`), `${e.name} has no lid`);
+  });
   const count = s => src.split(s).length - 1;
   assert.strictEqual(count('d += turn('), rig.effects.filter(e => e.kind === 'swing').length);
   assert.strictEqual(count('d += ') - count('d += turn('), rig.effects.filter(e => !['hold', 'swing', 'blink'].includes(e.kind)).length);
-  assert.strictEqual(count('l += '), rig.effects.filter(e => e.kind === 'blink').length);
+  assert.strictEqual(count('c = blink'), rig.effects.filter(e => e.kind === 'blink').length);
+  // Every mask in a place of its own.
+  const slots = rig.effects.flatMap(e => [e.mask, e.lid].filter(Boolean).map(m => m.join()));
+  assert.strictEqual(new Set(slots).size, slots.length, 'two masks share a place');
 });
 
 test('rig: the shipped rig blinks both eyes shut, and nothing else', () => {
@@ -578,17 +640,32 @@ test('rig: the shipped rig blinks both eyes shut, and nothing else', () => {
   const m = new Rig.Motion();
   m.blink(50);
   const vals = m.values(50 + blinks[0].span * 0.42, rig.effects);
-  // Columns of each eye: the bottom of its upper lash, and the top of its lower lid.
-  for (const [x, lash, lid] of [[372, 151, 170], [380, 149, 171], [388, 150, 168], [448, 129, 148], [452, 128, 147], [458, 127, 148]]) {
-    for (let y = lash + 2; y <= lid - 2; y++) {
-      const q = Rig.blinked(rig.effects, vals, mask, [x, y]);
-      assert.ok(q[1] <= lash + 1, `shut, ${x},${y} shows ${q[1].toFixed(1)} (the lash ends at ${lash})`);
+  // Columns of each eye, as measured on the picture: the top and bottom rows of its upper
+  // lash, and the bottom row of the eye.
+  const EYES = [[372, 147, 150, 170], [380, 145, 148, 170], [388, 147, 149, 167], [448, 122, 128, 147], [452, 122, 127, 147], [458, 121, 126, 148]];
+  // (The row under the lash comes down with it, as the lid's soft lower edge.)
+  const inEye = r => EYES.some(([x, , lash, end]) => Math.abs(r[0] - x) < 2.5 && r[1] >= lash + 2 && r[1] < end + 1);
+  const inLash = r => EYES.some(([x, top, lash]) => Math.abs(r[0] - x) < 2.5 && r[1] >= top && r[1] < lash + 1);
+  const tag = f => r => [f(r) ? 1 : 0, 0, 0, 1];
+  const [skin] = blinks.map(e => e.skin);
+  assert.ok(!inEye(skin) && !inLash(skin), 'the skin spot is on the eye');
+  for (const [x, top, lash, end] of EYES) {
+    // Shut, none of the eye shows ...
+    for (let y = lash + 2; y <= end; y++) {
+      const c = Rig.blinked(rig.effects, vals, mask, [x + 0.5, y + 0.5], tag(inEye));
+      assert.ok(c[0] < 0.05, `shut, ${x},${y} shows ${c[0].toFixed(2)} of the eye`);
     }
+    // ... and the lash has come down onto the bottom of it.
+    const low = [0, 1, 2].map(k => Rig.blinked(rig.effects, vals, mask, [x + 0.5, end - k + 0.5], tag(inLash))[0]);
+    assert.ok(Math.max(...low) > 0.95, `shut, the lash at ${x} is not down at ${end} (${low.map(v => v.toFixed(2))})`);
+    const up = Rig.blinked(rig.effects, vals, mask, [x + 0.5, top + 0.5], tag(inLash))[0];
+    assert.ok(up < 0.05, `shut, the lash at ${x} is still up at ${top}`);
   }
+  const same = r => [r[0], r[1], 0, 1];
   for (let y = 0; y < rig.size[1] * 0.6; y += 5) {
     for (let x = 0; x < rig.size[0]; x += 5) {
-      if (x > 350 && x < 475 && y > 100 && y < 180) continue;
-      assert.deepStrictEqual([...Rig.blinked(rig.effects, vals, mask, [x, y])], [x, y], `the blink moves ${x},${y}`);
+      if (x > 350 && x < 475 && y > 110 && y < 180) continue;
+      assert.deepStrictEqual([...Rig.blinked(rig.effects, vals, mask, [x, y], same)], [x, y, 0, 1], `the blink changes ${x},${y}`);
     }
   }
 });

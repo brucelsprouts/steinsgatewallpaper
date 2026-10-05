@@ -15,22 +15,27 @@
 //   wave      ripples running across it (hair, loose cloth)
 //   breathe   rises and falls with each breath
 //   parallax  shifts with the cursor as if nearer (or, with less than 0, farther)
-//   blink     shuts the eyes now and then: what's painted takes its colour from further
-//             up, so the lid comes down over the eye
+//   blink     shuts the eyes now and then. It has two masks: the eye, and inside it the
+//             upper lid (its lash) that comes down over it
 // The masks are painted on the picture standing still. For each pixel it draws, the shader
 // finds which pixel of the picture has been pushed there (a few rounds of fixed-point
 // iteration), so each mask moves along with what it was painted on. A mask's soft edge
 // should be at least as wide as the part it moves travels: a sharp one folds the picture
-// over itself, which shows as a seam. A blink is the one exception: like Wallpaper Engine's
-// Shake, it looks the colour up further along instead of pushing, after the rest is
-// worked out, so it can cover an eye completely (a push can't squeeze one shut).
+// over itself, which shows as a seam. A blink is the one exception: it pushes nothing.
+// After the rest is worked out, its lid is drawn again further down, its bottom edge
+// coming down to the bottom of the eye, and where the lid was or has passed shows skin (the
+// colour at a spot chosen on her face). So it covers the eye completely, whatever is above
+// it, where a push could only squeeze the eye and a look further up would pull hair down.
 //
 // A rig lives beside its picture: img/makise.webp has img/makise-rig.js (a script, so it
 // loads from a local file too) and the masks it names.
 const Rig = (() => {
   const { TAU, hash } = Kit;
-  const MAX = 15;     // effects in one rig (three masks to each of five textures)
+  const MAX = 15;     // masks in one rig (three to each of five textures): a blink has two
   const SCALE = 0.5;  // the masks' size, against the picture's
+  // How far up and down a blink looks for its lid and the bottom of its eye (picture px):
+  // REACH steps of STEP, so an eye up to about 90 px from the top of its lid to its bottom.
+  const STEP = 2, REACH = 48;
 
   // The settings an effect takes: default, range, step, label, unit and what it does.
   const P = (v, min, max, step, label, unit, tip) => ({ v, min, max, step, label, unit, tip });
@@ -49,7 +54,7 @@ const Rig = (() => {
       tip: 'What must never bend. Sway, swing and waves leave it be; breathing and parallax still carry it, whole' },
     sway: { label: 'Sway', color: [255, 168, 64], hold: true, params: SPRING,
       tip: 'Trails behind as she drifts, and blows in the breeze' },
-    swing: { label: 'Swing', color: [130, 222, 100], hold: true, pivot: true,
+    swing: { label: 'Swing', color: [130, 222, 100], hold: true, point: 'pivot',
       params: { ...SPRING, max: P(6, 1, 40, 0.5, 'Limit', 'px', 'About the most its tip ever moves'),
         length: P(500, 50, 1500, 10, 'Length', 'px', 'From the pivot to the tip: how far the swing reaches') },
       tip: 'Turns about its pivot as it trails and blows: an arm in its sleeve' },
@@ -73,36 +78,42 @@ const Rig = (() => {
     parallax: { label: 'Parallax', color: [176, 136, 255], hold: false,
       params: { amount: P(5, -40, 40, 0.5, 'Depth', 'px', 'How far it shifts with the cursor: nearer, or below 0 farther') },
       tip: 'Shifts with the cursor, as if nearer (or farther) than the rest' },
-    blink: { label: 'Blink', color: [250, 226, 80], hold: null,
+    blink: { label: 'Blink', color: [250, 226, 80], lid: [90, 200, 255], hold: null, point: 'skin',
       params: {
-        amount: P(20, 0, 60, 0.5, 'Travel', 'px', 'How far the lid comes down where it is painted at full strength'),
         every: P(5, 1.5, 30, 0.1, 'Every', 's', 'Seconds between blinks on average, from a quarter of this to 1.75 times'),
         span: P(0.16, 0.06, 0.6, 0.01, 'Length', 's', 'How long a blink takes, shutting and opening again'),
         twice: P(0.15, 0, 1, 0.01, 'Doubles', '', 'How often a second blink follows straight after'),
         dir: P(90, 0, 360, 1, 'Direction', '°', 'Which way the lid comes down: 90 down'),
+        shade: P(0.3, 0, 0.6, 0.01, 'Shade', '', 'How much darker the shut lid is than the skin it takes its colour from: most at its top, under her hair, easing off toward the lash'),
       },
-      tip: 'Shuts the eyes now and then: what is painted takes its colour from further up, so the lid comes down. Paint each eye strongest just above its lower lash, fading up over the lid, with a sharp edge under the lower lash' },
+      tip: 'Shuts the eyes now and then: the lid comes down over the eye until its lower edge reaches the bottom of the eye, and skin fills in above it. Paint the Eye over all of each eye, from the top of its lash to its lower lid, then the Lid inside it over the dark upper lash (a px or so beyond it), and drag the skin spot onto bare skin' },
   };
+  // How many masks an effect of a kind has: a blink's eye and lid, one for the rest.
+  const slots = kind => (kind === 'blink' ? 2 : 1);
 
   const num = (v, p) => (Number.isFinite(Number(v)) ? Math.min(p.max, Math.max(p.min, Number(v))) : p.v);
 
-  // A rig as written (by the editor or by hand), checked and completed: unknown kinds and
-  // any hold beyond the first are dropped, settings kept in range, defaults filled in. A
-  // blink pays Hold still no heed, so it has no say in it.
-  // Each effect keeps its mask, [map, channel] into `maps`, if it has a valid one.
+  // A rig as written (by the editor or by hand), checked and completed: unknown kinds,
+  // any hold beyond the first and effects past MAX masks are dropped, settings kept in
+  // range, defaults filled in. A blink pays Hold still no heed, so it has no say in it.
+  // Each effect keeps its mask, [map, channel] into `maps`, if it has a valid one (and a
+  // blink its lid's); a swing its pivot and a blink its skin spot (picture px).
   function normalize(src = {}) {
     const maps = Array.isArray(src.maps) ? src.maps.map(String) : [];
+    const slot = m => (Array.isArray(m) && m[0] >= 0 && m[0] < maps.length && m[1] >= 0 && m[1] < 3 ? [m[0] | 0, m[1] | 0] : null);
+    const point = v => (Array.isArray(v) && v.length >= 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]) ? [v[0], v[1]] : [0, 0]);
     const effects = [];
+    let used = 0;
     for (const raw of Array.isArray(src.effects) ? src.effects : []) {
       const K = raw && KINDS[raw.kind];
-      if (!K || effects.length >= MAX || (raw.kind === 'hold' && effects.some(e => e.kind === 'hold'))) continue;
+      if (!K || used + slots(raw.kind) > MAX || (raw.kind === 'hold' && effects.some(e => e.kind === 'hold'))) continue;
+      used += slots(raw.kind);
       const e = { kind: raw.kind, name: String(raw.name || K.label), on: raw.on !== false };
       if (raw.kind !== 'hold' && K.hold !== null) e.hold = typeof raw.hold === 'boolean' ? raw.hold : K.hold;
       for (const [k, p] of Object.entries(K.params)) e[k] = num(raw[k], p);
-      const pv = raw.pivot;
-      if (K.pivot) e.pivot = Array.isArray(pv) && pv.length >= 2 && Number.isFinite(pv[0]) && Number.isFinite(pv[1]) ? [pv[0], pv[1]] : [0, 0];
-      const m = raw.mask;
-      e.mask = Array.isArray(m) && m[0] >= 0 && m[0] < maps.length && m[1] >= 0 && m[1] < 3 ? [m[0] | 0, m[1] | 0] : null;
+      if (K.point) e[K.point] = point(raw[K.point]);
+      e.mask = slot(raw.mask);
+      if (raw.kind === 'blink') e.lid = slot(raw.lid);
       effects.push(e);
     }
     const size = Array.isArray(src.size) && src.size.length === 2 ? src.size.map(Number) : null;
@@ -305,8 +316,7 @@ const Rig = (() => {
           // Nearer moves against the cursor, as the scene's nearer layers do.
           out[A] = -c.x * e.amount; out[A + 1] = -c.y * e.amount * 0.7;
         } else if (e.kind === 'blink') {
-          const k = e.amount * this.shut(t, e);
-          out[A] = Math.cos(rad) * k; out[A + 1] = Math.sin(rad) * k;
+          out.set([Math.cos(rad), Math.sin(rad), this.shut(t, e), e.shade, e.skin[0], e.skin[1]], A);
         }
       });
       return out;
@@ -330,8 +340,7 @@ const Rig = (() => {
       return `  d += ${m} * ${A}.xy;`;
     }).filter(Boolean).join('\n');
     const maps = Array.from({ length: n }, (_, i) => i);
-    const blinks = effects.map((e, i) => [e, i]).filter(([e]) => e.kind === 'blink' && e.mask);
-    const lids = [...new Set(blinks.map(([e]) => e.mask[0]))];
+    const blinks = effects.map((e, i) => [e, i]).filter(([e]) => e.kind === 'blink' && e.mask && e.lid);
     return `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -344,7 +353,8 @@ uniform vec2 size;      // the picture, in its own px
 uniform float fade;     // how much of its height dissolves at the bottom
 uniform float still;    // 1 holds it still (the editor, while painting)
 uniform vec4 fx[${Math.max(2, effects.length * 2)}];
-uniform float ovK, ovMap; uniform vec4 ovSel; uniform vec3 ovCol; // the editor's view of a mask
+// The editor's view of up to two masks: how strongly, which texture and channel, what colour.
+uniform float ovK, ovMap, ov2K, ov2Map; uniform vec4 ovSel, ov2Sel; uniform vec3 ovCol, ov2Col;
 // How far a point r from a pivot moves, turned by a about it.
 vec2 turn(vec2 r, float a) {
   float c = cos(a), s = sin(a);
@@ -363,42 +373,82 @@ ${maps.map(i => `  vec4 a${i} = texture2D(m${i}, t);`).join('\n')}
   vec2 d = vec2(0.0);
 ${sum}
   return d;
-}${blinks.length ? `
-// How far a blink looks further up for the colour at q: by as much as is painted there
-// and as shut as the eyes are.
-vec2 lid(vec2 q) {
-  vec2 t = q / size;
-${lids.map(i => `  vec4 a${i} = texture2D(m${i}, t);`).join('\n')}
-  vec2 l = vec2(0.0);
-${blinks.map(([e, i]) => `  l += ${M(e)} * fx[${2 * i}].xy;`).join('\n')}
-  return l;
-}` : ''}
-vec4 shown(vec2 t) {
-${maps.map(i => `  if (ovMap < ${i}.5) return texture2D(m${i}, t);`).join('\n')}
+}${blinks.map(([e, i]) => blinkShader(e, i)).join('')}
+vec4 shown(vec2 t, float m) {
+${maps.map(i => `  if (m < ${i}.5) return texture2D(m${i}, t);`).join('\n')}
   return vec4(0.0);
 }
 void main() {
   vec2 p = uv * size, q = p;
-  float squeeze = 0.0;
-  if (still < 0.5) {${used.length ? `
+  if (still < 0.5 && ${used.length ? 'true' : 'false'}) {
     // Plain rounds first, then damped ones, which settle even where the picture is
     // stretched to more than twice its size.
     q = p - field(p);
     q = p - field(q);
     q = mix(q, p - field(q), 0.6);
-    q = mix(q, p - field(q), 0.6);` : ''}${blinks.length ? `
-
-    // The eyes blink, there. Where the lids meet, all of the eye between them is squeezed
-    // into a px or two: that shows as lash, darkened, not as a sliver of eye.
-    vec2 l = lid(q), u = l / max(length(l), 1e-4);
-    squeeze = max(0.0, -dot(lid(q + u) - l, u));
-    q -= l;` : ''}
+    q = mix(q, p - field(q), 0.6);
   }
   vec2 t = q / size;
-  vec4 c = texture2D(pic, t) * step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);
-  c.rgb *= 1.0 - 0.75 * clamp((squeeze - 0.5) / 3.0, 0.0, 1.0);
-  if (ovK > 0.0) c = mix(c, vec4(ovCol, 1.0), ovK * dot(shown(t), ovSel));
+  vec4 c = texture2D(pic, t) * step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);${blinks.length ? `
+  if (still < 0.5) {
+${blinks.map(([, i]) => `    c = blink${i}(q, c);`).join('\n')}
+  }` : ''}
+  if (ovK > 0.0) c = mix(c, vec4(ovCol, 1.0), ovK * dot(shown(t, ovMap), ovSel));
+  if (ov2K > 0.0) c = mix(c, vec4(ov2Col, 1.0), ov2K * dot(shown(t, ov2Map), ov2Sel));
   gl_FragColor = c * (1.0 - smoothstep(1.0 - fade, 1.0, uv.y));
+}`;
+  }
+
+  // The shader's part for a blink, the `i`th effect: blink<i>(q, c) is the colour c drawn
+  // at the picture's px q with the eyes as shut as fx[2i].z says. Its lid comes down along
+  // fx[2i].xy, each column as far as takes the lid's lower edge to the bottom of the eye
+  // there; what the lid has left or passed over shows the skin at fx[2i+1].xy,
+  // in a warm shadow as deep as fx[2i].w at its top. The edges are where the masks cross
+  // half strength. blinked() does the same.
+  function blinkShader(e, i) {
+    const [em, ec] = e.mask, [lm, lc] = e.lid, S = STEP.toFixed(1);
+    const fetch = em === lm
+      ? `vec4 a = texture2D(m${em}, r / size);\n  return vec2(a.${CH[ec]}, a.${CH[lc]});`
+      : `return vec2(texture2D(m${em}, r / size).${CH[ec]}, texture2D(m${lm}, r / size).${CH[lc]});`;
+    return `
+// Blink ${i}: its eye (x) and lid (y) masks at r.
+vec2 eyelid${i}(vec2 r) {
+  ${fetch}
+}
+vec4 blink${i}(vec2 q, vec4 c) {
+  vec4 A = fx[${2 * i}], B = fx[${2 * i + 1}];
+  vec2 h = eyelid${i}(q);
+  float here = max(h.x, h.y); // the lid is part of the eye
+  if (A.z <= 0.0 || here <= 0.0) return c;
+  // Down the column through q, in px from q: where the lid's top and bottom edges are, and
+  // where the eye ends below it.
+  float top = -1e4, bot = -1e4, end = -1e4, pl = 0.0, pe = 0.0;
+  for (int k = 0; k <= ${2 * REACH}; k++) {
+    float o = float(k - ${REACH}) * ${S};
+    vec2 m = eyelid${i}(q + o * A.xy);
+    float l = m.y, e = max(m.x, m.y);
+    if (k > 0) {
+      if (top < -1e3) { if (pl <= 0.5 && l > 0.5) top = o - ${S} * (l - 0.5) / (l - pl); }
+      else if (bot < -1e3 && l <= 0.5) bot = o - ${S} * (0.5 - l) / (pl - l);
+      if (bot > -1e3 && e <= 0.5) { end = o - ${S} * (0.5 - e) / (pe - e); break; }
+    }
+    pl = l; pe = e;
+  }
+  float d = A.z * max(0.0, end - bot); // how far the lid has come down here
+  if (end < -1e3 || d <= 0.0) return c;
+  // Behind it, skin from where its top was down to its middle (eased in over its first px
+  // of travel), shaded warm, most at the top and a third as much by the lash; and the eye
+  // below that.
+  vec4 skin = (texture2D(pic, B.xy / size) + texture2D(pic, (B.xy + vec2(2.0, 0.0)) / size)
+    + texture2D(pic, (B.xy - vec2(2.0, 0.0)) / size) + texture2D(pic, (B.xy + vec2(0.0, 2.0)) / size)
+    + texture2D(pic, (B.xy - vec2(0.0, 2.0)) / size)) * 0.2;
+  skin.rgb *= 1.0 - A.w * (1.0 - 0.67 * clamp(-top / max(d, 1.0), 0.0, 1.0)) * vec3(0.55, 1.0, 1.3);
+  float behind = clamp(0.5 - top, 0.0, 1.0) * clamp(top + d + 0.5 * (bot - top) + 0.5, 0.0, 1.0) * min(1.0, d);
+  // The part of the lid that has come down to q, over that: solid inside its edges, whose
+  // softness is the masks' (they're at half size), halved.
+  vec2 r = q - d * A.xy;
+  vec4 o = mix(mix(c, skin, behind), texture2D(pic, r / size), clamp(2.0 * eyelid${i}(r).y - 0.5, 0.0, 1.0));
+  return mix(c, o, min(1.0, 2.0 * here));
 }`;
   }
 
@@ -436,17 +486,39 @@ void main() {
     return q;
   }
 
-  // Where the shader takes the colour from instead of the picture's pixel q once the eyes
-  // blink (its lid()): further up, by as much as each blink is painted there and as shut
-  // as its eyes are.
-  function blinked(effects, vals, mask, q) {
-    let x = q[0], y = q[1];
+  // The colour the shader draws at the picture's px q once the eyes blink (its blink<i>()):
+  // `colour(r)` gives the picture's colour at r ([r, g, b, a], premultiplied), the rest as
+  // for push().
+  function blinked(effects, vals, mask, q, colour) {
+    const mix = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), clamp = v => Math.min(1, Math.max(0, v));
+    let c = colour(q);
     effects.forEach((e, i) => {
-      if (e.kind !== 'blink' || !e.mask) return;
-      const m = mask(e.mask[0], q)[e.mask[1]];
-      x -= m * vals[i * 8]; y -= m * vals[i * 8 + 1];
+      if (e.kind !== 'blink' || !e.mask || !e.lid) return;
+      const A = i * 8, B = A + 4, ux = vals[A], uy = vals[A + 1], s = vals[A + 2];
+      const eyelid = r => [mask(e.mask[0], r)[e.mask[1]], mask(e.lid[0], r)[e.lid[1]]];
+      const h = eyelid(q), here = Math.max(h[0], h[1]);
+      if (!(s > 0) || here <= 0) return;
+      let top = -1e4, bot = -1e4, end = -1e4, pl = 0, pe = 0;
+      for (let k = 0; k <= 2 * REACH; k++) {
+        const o = (k - REACH) * STEP, m = eyelid([q[0] + o * ux, q[1] + o * uy]), l = m[1], ee = Math.max(m[0], m[1]);
+        if (k > 0) {
+          if (top < -1e3) { if (pl <= 0.5 && l > 0.5) top = o - STEP * (l - 0.5) / (l - pl); }
+          else if (bot < -1e3 && l <= 0.5) bot = o - STEP * (0.5 - l) / (pl - l);
+          if (bot > -1e3 && ee <= 0.5) { end = o - STEP * (0.5 - ee) / (pe - ee); break; }
+        }
+        pl = l; pe = ee;
+      }
+      const d = s * Math.max(0, end - bot);
+      if (end < -1e3 || d <= 0) return;
+      const sx = vals[B], sy = vals[B + 1], taps = [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2]].map(([x, y]) => colour([sx + x, sy + y]));
+      const shade = vals[A + 3] * (1 - 0.67 * clamp(-top / Math.max(d, 1)));
+      const skin = taps.reduce((a, t) => a.map((v, j) => v + t[j] * 0.2), [0, 0, 0, 0]).map((v, j) => (j < 3 ? v * (1 - shade * [0.55, 1, 1.3][j]) : v));
+      const behind = clamp(0.5 - top) * clamp(top + d + 0.5 * (bot - top) + 0.5) * Math.min(1, d);
+      const r = [q[0] - d * ux, q[1] - d * uy];
+      const o = mix(mix(c, skin, behind), colour(r), clamp(2 * eyelid(r)[1] - 0.5));
+      c = mix(c, o, Math.min(1, 2 * here));
     });
-    return [x, y];
+    return c;
   }
 
   const VERT = `
@@ -523,7 +595,7 @@ void main() {
         gl.linkProgram(prog);
         if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
         const u = {};
-        for (const k of ['pic', 'size', 'fade', 'still', 'fx', 'ovK', 'ovMap', 'ovSel', 'ovCol', ...Array.from({ length: n }, (_, i) => `m${i}`)]) {
+        for (const k of ['pic', 'size', 'fade', 'still', 'fx', 'ovK', 'ovMap', 'ovSel', 'ovCol', 'ov2K', 'ov2Map', 'ov2Sel', 'ov2Col', ...Array.from({ length: n }, (_, i) => `m${i}`)]) {
           u[k] = gl.getUniformLocation(prog, k);
         }
         p = { prog, u, a: gl.getAttribLocation(prog, 'a') };
@@ -592,8 +664,8 @@ void main() {
     }
 
     // Draw a moment, given Motion.values() for it. The editor may hold the picture still
-    // and show one mask over it: `overlay` {map, channel, color: [r, g, b], alpha}.
-    // Returns the canvas it's drawn on, or null.
+    // and show a mask or two over it: `overlay` {map, channel, color: [r, g, b], alpha}, or
+    // a list of them. Returns the canvas it's drawn on, or null.
     draw(vals, { still = false, overlay = null } = {}) {
       if (!this.ok) return null;
       const gl = this.gl, u = this.p.u;
@@ -601,17 +673,20 @@ void main() {
       gl.uniform1f(u.fade, this.fade);
       gl.uniform1f(u.still, still ? 1 : 0);
       gl.uniform4fv(u.fx, vals);
-      gl.uniform1f(u.ovK, overlay ? overlay.alpha : 0);
-      if (overlay) {
-        gl.uniform1f(u.ovMap, overlay.map);
-        gl.uniform4f(u.ovSel, +(overlay.channel === 0), +(overlay.channel === 1), +(overlay.channel === 2), 0);
-        gl.uniform3f(u.ovCol, overlay.color[0] / 255, overlay.color[1] / 255, overlay.color[2] / 255);
-      }
+      const ovs = [].concat(overlay || []);
+      ['ov', 'ov2'].forEach((n, k) => {
+        const o = ovs[k];
+        gl.uniform1f(u[n + 'K'], o ? o.alpha : 0);
+        if (!o) return;
+        gl.uniform1f(u[n + 'Map'], o.map);
+        gl.uniform4f(u[n + 'Sel'], +(o.channel === 0), +(o.channel === 1), +(o.channel === 2), 0);
+        gl.uniform3f(u[n + 'Col'], o.color[0] / 255, o.color[1] / 255, o.color[2] / 255);
+      });
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return this.canvas;
     }
   }
 
-  return { KINDS, MAX, SCALE, normalize, make, add, load, breeze, breath, shut, Spring, Motion, Renderer, fragment, push, source, blinked };
+  return { KINDS, MAX, SCALE, STEP, REACH, slots, normalize, make, add, load, breeze, breath, shut, Spring, Motion, Renderer, fragment, push, source, blinked };
 })();

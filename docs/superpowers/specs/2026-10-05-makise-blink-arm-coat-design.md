@@ -20,6 +20,9 @@ looks up each pixel's colour at an offset (a pull), so the eye is covered, never
 
 ## Blink
 
+(Replaced: the blink now brings a painted lid down over a painted eye. See
+[2026-10-05-makise-blink-lid-design.md](2026-10-05-makise-blink-lid-design.md).)
+
 A new effect kind, **Blink**, in `rig.js` and the editor.
 
 - **What it does:** everything painted for it takes its colour from further up (along its

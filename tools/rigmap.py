@@ -1,8 +1,8 @@
 """Make the starting rig for the Makise picture: python tools/rigmap.py
 
 Reads wallpaper/img/makise.webp and writes beside it makise-rig.js and the masks it
-names (makise-rig-0.png to -3.png: three masks to each, red, green and blue, at half
-the picture's size). Touch the rig up afterwards in tools/rig.html; running this
+names (makise-rig-0.png to -4.png: three masks to each, red, green and blue, at half
+the picture's size, in the order the editor packs them). Touch the rig up afterwards in tools/rig.html; running this
 again starts it over.
 
 The masks come from the colours of the hair, jacket and tie inside regions placed by hand
@@ -18,7 +18,9 @@ for this picture, and from her lash lines measured on it, so they fit it alone:
   flutter    waves through the loose cuffs and hem
   breath     everything above her chest, easing off to nothing at the waist
   head       her head, a little nearer than the rest (parallax)
-  blink      each eye's lid comes down so its upper lash lands on the lower lid
+  blink      two masks: each eye, from the top of its upper lash to its lower lid, and
+             the lid inside it (the upper lash, a px beyond), which comes down until
+             its lower edge reaches the bottom of the eye
   forearm    her left forearm (screen right) bends a little at the elbow
   hem        the jacket round her legs sways, beside but apart from that forearm
   tie        the tie sways a little from its knot
@@ -66,16 +68,22 @@ MID = 440                            # the middle of her body
 CHEST = (290, 620)                   # rows over which the breath eases off, shoulders to waist
 NECK = (230, 330)                    # rows over which the head's parallax eases off
 MARGIN = 16                          # how far the hold reaches over what moves beside it (px)
-EYELIDS = [  # each eye, column by column: x, the top and bottom of its upper lash, the top of its lower lid
-    [(360, 149, 155, 155), (362, 149, 156, 158), (364, 149, 154, 162), (366, 149, 153, 167), (368, 148, 152, 168),
-     (370, 147, 151, 169), (372, 146, 151, 170), (374, 146, 150, 170), (376, 144, 150, 171), (378, 144, 150, 171),
-     (380, 145, 149, 171), (382, 145, 150, 170), (384, 145, 150, 168), (386, 146, 150, 168), (388, 147, 150, 168),
-     (390, 147, 151, 167), (392, 148, 152, 164), (394, 151, 153, 163), (396, 147, 150, 154), (398, 148, 150, 150)],
-    [(441, 126, 133, 133), (444, 125, 130, 147), (446, 123, 130, 147), (448, 122, 129, 148), (450, 122, 128, 148),
-     (452, 122, 128, 147), (454, 120, 127, 147), (456, 120, 127, 147), (458, 121, 127, 148), (460, 121, 130, 149),
-     (462, 128, 133, 147), (464, 130, 136, 146), (467, 132, 139, 139)],
+EYELIDS = [  # each eye, column by column: x, the top and bottom rows of its dark upper lash, and
+    # the bottom row of the eye below it (its lower lid line where one is drawn, or the last
+    # row before bare skin, or before the hair that hangs in front of it), measured on the
+    # picture. Her right eye (screen left), then her left.
+    [(361, 149, 156, 156), (362, 149, 155, 158), (364, 149, 153, 164), (366, 149, 152, 167), (368, 148, 151, 169),
+     (370, 147, 150, 170), (372, 147, 150, 170), (374, 147, 150, 171), (376, 144, 149, 171), (378, 145, 148, 170),
+     (380, 145, 148, 170), (382, 145, 148, 169), (384, 146, 149, 167), (386, 146, 149, 167), (388, 147, 149, 167),
+     (390, 148, 150, 166), (392, 148, 151, 165), (393, 150, 152, 163), (394, 151, 152, 158), (395, 152, 152, 152)],
+    [(437, 126, 134, 134), (438, 126, 131, 135), (440, 126, 133, 143), (442, 126, 131, 145), (444, 125, 129, 147),
+     (446, 123, 128, 147), (448, 122, 128, 147), (450, 123, 127, 147), (452, 122, 127, 147), (454, 121, 126, 147),
+     (456, 120, 126, 147), (458, 121, 126, 148), (460, 121, 129, 148), (462, 120, 132, 147), (464, 120, 134, 144),
+     (466, 121, 134, 137), (467, 121, 134, 134)],
 ]
-TRAVEL = 24                          # how far the lid comes down where its mask is full
+LAND = 1                             # how far into the lower lid the shut lash comes down (px)
+CORNER = 4                           # how far in from its corners the shut lash rises to meet them (px)
+SKIN = (425, 172)                    # bare skin on her cheek: the colour of a shut lid
 ELBOW = (640, 560)                   # her left elbow
 FOREARM = [  # her left sleeve below the elbow, its cuff and her hand: out over the air beside
     (602, 548), (690, 548), (700, 610), (722, 700), (742, 762), (750, 792), (758, 858),  # it but
@@ -169,23 +177,22 @@ flutter = blur(coat * smooth(500, 860, ys) * smooth(70, 190, np.abs(xs - MID)) *
 breath = 1 - smooth(CHEST[0], CHEST[1], ys)
 head = (1 - smooth(NECK[0], NECK[1], ys)) * blur(reach(opaque, 4, 30), 8)
 
-# She blinks: in each column of each eye, the upper lash comes down whole onto the lower
-# lid, and a thin strip of lid above it stretches down behind it. Stored as how far (over
-# TRAVEL): nothing above that strip, rising over it to the full height the eye is open
-# there, held over the lash's resting place on the lower lid, and gone within a px or two
-# below it.
-blink = np.zeros((H, W), np.float32)
+# She blinks: in each column of each eye the upper lid (its lash, with a row either side so
+# its soft edges come too) comes down until its lower edge reaches the bottom of the eye,
+# LAND rows below its last, so the lash covers the lower lid line; skin fills in above.
+# The eye runs from the top of the lid to there. Both are whole over their rows and nothing
+# beyond (the shader finds their edges where they cross half).
+eyes = np.zeros((H, W), np.float32)
+lids = np.zeros((H, W), np.float32)
 rows = np.arange(H, dtype=np.float32)
+band = lambda a, b: np.clip(np.minimum(rows - a, b - rows) + 0.5, 0, 1)  # rows a..b
 for eye in EYELIDS:
-    ex, top, lash, lid = (np.array(c, np.float32) for c in zip(*eye))
+    ex, top, lash, low = (np.array(c, np.float32) for c in zip(*eye))
     for x in range(int(ex[0]), int(ex[-1]) + 1):
-        t, b, l = (np.interp(x, ex, c) for c in (top, lash, lid))
-        T = l - b
-        if T <= 0:
-            continue
-        start = t - max(4.0, 0.4 * T)
-        ramp = np.clip((rows - start) / (l - (b - t) - start), 0, 1)
-        blink[:, x] = np.maximum(blink[:, x], T / TRAVEL * np.where(rows <= l, ramp, np.clip(1 - (rows - l) / 1.5, 0, 1)))
+        t, b, l = (np.interp(x, ex, c) for c in (top, lash, low))
+        l = b + (l - b) * smooth(0, CORNER, min(x - ex[0], ex[-1] - x) + 1)  # easing in at the corners
+        eyes[:, x] = np.maximum(eyes[:, x], band(t - 1.5, l + LAND + 0.5))
+        lids[:, x] = np.maximum(lids[:, x], band(t - 1.5, b + 1.5))
 
 # Her left forearm bends at the elbow: its sleeve, cuff and hand, reaching out over the air
 # beside it but fading out before the coat it lies against, growing from the elbow.
@@ -205,11 +212,12 @@ tie = blur(reach(tie, 1, 6), 2) * smooth(300, 430, ys) * (1 - smooth(586, 612, y
 # Three masks to a PNG, at half size.
 q = ((W + 1) // 2, (H + 1) // 2)
 half = lambda m: Image.fromarray(np.uint8(np.clip(m, 0, 1) * 255 + 0.5)).resize(q, Image.BOX)
-maps = [[hold, sway, ripples], [arms[0], arms[1], flutter], [breath, head, blink], [forearm, hem, tie]]
+masks = [hold, sway, ripples, arms[0], arms[1], flutter, breath, head, eyes, lids, forearm, hem, tie]
+masks += [np.zeros((H, W), np.float32)] * (-len(masks) % 3)
 names = []
-for i, chans in enumerate(maps):
+for i in range(len(masks) // 3):
     names.append(f'makise-rig-{i}.png')
-    Image.merge('RGB', [half(m) for m in chans]).save(img / names[-1], optimize=True)
+    Image.merge('RGB', [half(m) for m in masks[3 * i:3 * i + 3]]).save(img / names[-1], optimize=True)
 
 # The rig itself: settings in the picture's own px.
 effects = [
@@ -223,11 +231,12 @@ effects = [
     {'kind': 'wave', 'name': 'Coat flutter', 'mask': [1, 2], 'amount': 0.8, 'length': 270, 'speed': 56, 'dir': 62, 'gust': 3.5, 'vary': 0},
     {'kind': 'breathe', 'name': 'Breath', 'mask': [2, 0], 'amount': 0.9, 'dir': 270, 'period': 4.8},
     {'kind': 'parallax', 'name': 'Head', 'mask': [2, 1], 'amount': 3},
-    {'kind': 'blink', 'name': 'Blink', 'mask': [2, 2], 'amount': TRAVEL, 'every': 5, 'span': 0.16, 'twice': 0.15, 'dir': 90},
-    {'kind': 'swing', 'name': 'Left forearm', 'mask': [3, 0], 'pivot': list(ELBOW), 'length': FOREARM_LEN,
+    {'kind': 'blink', 'name': 'Blink', 'mask': [2, 2], 'lid': [3, 0], 'every': 5, 'span': 0.16, 'twice': 0.15, 'dir': 90,
+     'shade': 0.3, 'skin': list(SKIN)},
+    {'kind': 'swing', 'name': 'Left forearm', 'mask': [3, 1], 'pivot': list(ELBOW), 'length': FOREARM_LEN,
      'gain': 1.2, 'wind': 1, 'hz': 0.5, 'damp': 0.3, 'max': 3.5, 'idle': 2},
-    {'kind': 'sway', 'name': 'Coat hem', 'mask': [3, 1], 'gain': 1.8, 'wind': 3.5, 'hz': 0.42, 'damp': 0.32, 'max': 6},
-    {'kind': 'swing', 'name': 'Tie', 'hold': False, 'mask': [3, 2], 'pivot': list(KNOT), 'length': TIE_LEN,
+    {'kind': 'sway', 'name': 'Coat hem', 'mask': [3, 2], 'gain': 1.8, 'wind': 3.5, 'hz': 0.42, 'damp': 0.32, 'max': 6},
+    {'kind': 'swing', 'name': 'Tie', 'hold': False, 'mask': [4, 0], 'pivot': list(KNOT), 'length': TIE_LEN,
      'gain': 1.2, 'wind': 1.2, 'hz': 0.7, 'damp': 0.25, 'max': 2.5},
 ]
 line = lambda v: json.dumps(v, separators=(',', ':'))
