@@ -15,17 +15,21 @@
 //   wave      ripples running across it (hair, loose cloth)
 //   breathe   rises and falls with each breath
 //   parallax  shifts with the cursor as if nearer (or, with less than 0, farther)
+//   blink     shuts the eyes now and then: what's painted takes its colour from further
+//             up, so the lid comes down over the eye
 // The masks are painted on the picture standing still. For each pixel it draws, the shader
 // finds which pixel of the picture has been pushed there (a few rounds of fixed-point
 // iteration), so each mask moves along with what it was painted on. A mask's soft edge
 // should be at least as wide as the part it moves travels: a sharp one folds the picture
-// over itself, which shows as a seam.
+// over itself, which shows as a seam. A blink is the one exception: like Wallpaper Engine's
+// Shake, it looks the colour up further along instead of pushing, after the rest is
+// worked out, so it can cover an eye completely (a push can't squeeze one shut).
 //
 // A rig lives beside its picture: img/makise.webp has img/makise-rig.js (a script, so it
 // loads from a local file too) and the masks it names.
 const Rig = (() => {
   const { TAU, hash } = Kit;
-  const MAX = 12;     // effects in one rig (three masks to each of four textures)
+  const MAX = 15;     // effects in one rig (three masks to each of five textures)
   const SCALE = 0.5;  // the masks' size, against the picture's
 
   // The settings an effect takes: default, range, step, label, unit and what it does.
@@ -36,6 +40,7 @@ const Rig = (() => {
     hz: P(0.55, 0.1, 3, 0.01, 'Stiffness', 'Hz', 'How quickly it swings back'),
     damp: P(0.3, 0.02, 1, 0.01, 'Damping', '', 'How soon it settles'),
     max: P(12, 1, 40, 0.5, 'Limit', 'px', 'About the most it ever moves'),
+    idle: P(0, 0, 20, 0.1, 'Idle', 'px', 'How far it drifts about on its own, slowly, as if she shifted it'),
   };
   // The kinds of effect: their names and colours in the editor, whether held areas stay
   // still under them by default, and their settings (in the picture's own px).
@@ -68,12 +73,22 @@ const Rig = (() => {
     parallax: { label: 'Parallax', color: [176, 136, 255], hold: false,
       params: { amount: P(5, -40, 40, 0.5, 'Depth', 'px', 'How far it shifts with the cursor: nearer, or below 0 farther') },
       tip: 'Shifts with the cursor, as if nearer (or farther) than the rest' },
+    blink: { label: 'Blink', color: [250, 226, 80], hold: null,
+      params: {
+        amount: P(20, 0, 60, 0.5, 'Travel', 'px', 'How far the lid comes down where it is painted at full strength'),
+        every: P(5, 1.5, 30, 0.1, 'Every', 's', 'Seconds between blinks on average, from a quarter of this to 1.75 times'),
+        span: P(0.16, 0.06, 0.6, 0.01, 'Length', 's', 'How long a blink takes, shutting and opening again'),
+        twice: P(0.15, 0, 1, 0.01, 'Doubles', '', 'How often a second blink follows straight after'),
+        dir: P(90, 0, 360, 1, 'Direction', '°', 'Which way the lid comes down: 90 down'),
+      },
+      tip: 'Shuts the eyes now and then: what is painted takes its colour from further up, so the lid comes down. Paint each eye strongest just above its lower lash, fading up over the lid, with a sharp edge under the lower lash' },
   };
 
   const num = (v, p) => (Number.isFinite(Number(v)) ? Math.min(p.max, Math.max(p.min, Number(v))) : p.v);
 
   // A rig as written (by the editor or by hand), checked and completed: unknown kinds and
-  // any hold beyond the first are dropped, settings kept in range, defaults filled in.
+  // any hold beyond the first are dropped, settings kept in range, defaults filled in. A
+  // blink pays Hold still no heed, so it has no say in it.
   // Each effect keeps its mask, [map, channel] into `maps`, if it has a valid one.
   function normalize(src = {}) {
     const maps = Array.isArray(src.maps) ? src.maps.map(String) : [];
@@ -82,7 +97,7 @@ const Rig = (() => {
       const K = raw && KINDS[raw.kind];
       if (!K || effects.length >= MAX || (raw.kind === 'hold' && effects.some(e => e.kind === 'hold'))) continue;
       const e = { kind: raw.kind, name: String(raw.name || K.label), on: raw.on !== false };
-      if (raw.kind !== 'hold') e.hold = typeof raw.hold === 'boolean' ? raw.hold : K.hold;
+      if (raw.kind !== 'hold' && K.hold !== null) e.hold = typeof raw.hold === 'boolean' ? raw.hold : K.hold;
       for (const [k, p] of Object.entries(K.params)) e[k] = num(raw[k], p);
       const pv = raw.pivot;
       if (K.pivot) e.pivot = Array.isArray(pv) && pv.length >= 2 && Number.isFinite(pv[0]) && Number.isFinite(pv[1]) ? [pv[0], pv[1]] : [0, 0];
@@ -138,20 +153,56 @@ const Rig = (() => {
     return u < 0.4 ? 0.5 - 0.5 * Math.cos(Math.PI * u / 0.4) : 0.5 + 0.5 * Math.cos(Math.PI * (u - 0.4) / 0.6);
   }
 
+  // How far an effect drifts about on its own at time t (about -1..1): slow waves out of
+  // step with one another, timed by its own `seed` (0..1).
+  function drift(t, seed) {
+    return 0.5 * Math.sin(t * 0.29 + seed * 6.1) + 0.32 * Math.sin(t * 0.53 + seed * 9.7) + 0.18 * Math.sin(t * 1.07 + seed * 4.3);
+  }
+  // An effect's own seed, from its name.
+  function seedOf(name) {
+    let h = 0;
+    for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 100003;
+    return hash(h, 61);
+  }
+
+  // How shut the eyes are `u` seconds into a blink `span` seconds long (0..1): shutting over
+  // its first 30%, shut for the next 25%, opening (a little slower) over the rest.
+  function blinkCurve(u, span) {
+    const x = u / span;
+    if (!(x > 0 && x < 1)) return 0;
+    if (x < 0.3) return 0.5 - 0.5 * Math.cos(Math.PI * x / 0.3);
+    if (x < 0.55) return 1;
+    return 0.5 + 0.5 * Math.cos(Math.PI * (x - 0.55) / 0.45);
+  }
+  // How shut a blink's eyes are at time t (0..1): once at a random moment in each `every`
+  // seconds (in its first three quarters), now and then twice in a row. From the time
+  // alone, so every blink with the same `every` (both eyes) shuts at once.
+  function shut(t, e) {
+    const n = Math.floor(t / e.every);
+    let c = 0;
+    for (let k = n - 1; k <= n; k++) {
+      const at = (k + 0.75 * hash(k, 81)) * e.every;
+      c = Math.max(c, blinkCurve(t - at, e.span));
+      if (hash(k, 82) < e.twice) c = Math.max(c, blinkCurve(t - at - e.span * (1.2 + 0.4 * hash(k, 83)), e.span));
+    }
+    return c;
+  }
+
   // A spring trailing a moving anchor (px), pushed sideways by the breeze. Its settings
   // are the effect's own, read as it goes (so the editor's sliders act at once): `hz` how
   // fast it swings back, `damp` how soon it settles, `gain` how far its lag shows at full
-  // strength, `wind` how far the breeze pushes it and `max` about the most it ever moves.
+  // strength, `wind` how far the breeze pushes it, `idle` how far it drifts about on its
+  // own and `max` about the most it ever moves.
   class Spring {
-    constructor(o) { this.o = o; this.x = this.y = this.vx = this.vy = this.bx = this.by = 0; }
-    rest(w) { return w * this.o.wind / Math.max(1e-3, this.o.gain); }
-    snap(bx, by, w) {
+    constructor(o) { this.o = o; this.seed = seedOf(o.name); this.x = this.y = this.vx = this.vy = this.bx = this.by = 0; }
+    rest(w, t) { return (w * this.o.wind + drift(t, this.seed) * (this.o.idle || 0)) / Math.max(1e-3, this.o.gain); }
+    snap(bx, by, w, t) {
       this.bx = bx; this.by = by; this.vx = this.vy = 0;
-      this.x = bx + this.rest(w); this.y = by;
+      this.x = bx + this.rest(w, t); this.y = by;
     }
-    step(dt, bx, by, w) {
+    step(dt, bx, by, w, t) {
       const o = this.o, k = (TAU * o.hz) ** 2, c = 2 * o.damp * Math.sqrt(k);
-      this.vx += (-k * (this.x - bx - this.rest(w)) - c * this.vx) * dt;
+      this.vx += (-k * (this.x - bx - this.rest(w, t)) - c * this.vx) * dt;
       this.vy += (-k * (this.y - by) - 1.6 * c * this.vy) * dt; // hanging: settles sooner up and down
       this.x += this.vx * dt; this.y += this.vy * dt;
       this.bx = bx; this.by = by;
@@ -166,7 +217,7 @@ const Rig = (() => {
   const springy = e => e.kind === 'sway' || e.kind === 'swing';
 
   // Everything that moves over time: a spring for each sway and swing (trailing the
-  // picture as it drifts), the phases of the waves and where the cursor is.
+  // picture as it drifts), the phases of the waves, where the cursor is and the blinks.
   class Motion {
     constructor() {
       this.springs = new WeakMap();
@@ -174,6 +225,7 @@ const Rig = (() => {
       this.cursor = { x: 0, y: 0 };
       this.last = null; // when it was last stepped, and where the picture was
       this.gustAt = -1e9;
+      this.blinkAt = -1e9;
     }
 
     // The breeze at time t, with a gust on top if one was called up (the editor's).
@@ -185,12 +237,17 @@ const Rig = (() => {
     }
     blow(t) { this.gustAt = t; }
 
+    // How shut a blink's eyes are at time t, with a blink on top if one was called up (the
+    // editor's).
+    shut(t, e) { return Math.max(shut(t, e), blinkCurve(t - this.blinkAt, e.span)); }
+    blink(t) { this.blinkAt = t; }
+
     spring(e) {
       let s = this.springs.get(e);
       if (!s) {
         s = new Spring(e);
         const at = this.last || { t: 0, x: 0, y: 0 };
-        s.snap(at.x, at.y, this.air(at.t).x);
+        s.snap(at.x, at.y, this.air(at.t).x, at.t);
         this.springs.set(e, s);
       }
       return s;
@@ -215,14 +272,14 @@ const Rig = (() => {
       }
       if (!last || t <= last.t || t - last.t > 0.5) {
         const w = this.air(t).x;
-        for (const s of springs) s.snap(body.x, body.y, w);
+        for (const s of springs) s.snap(body.x, body.y, w, t);
         return;
       }
       const n = Math.ceil((t - last.t) * 120), dt = (t - last.t) / n;
       for (let i = 1; i <= n; i++) {
         const u = i / n, x = last.x + (body.x - last.x) * u, y = last.y + (body.y - last.y) * u;
-        const w = this.air(last.t + (t - last.t) * u).x;
-        for (const s of springs) s.step(dt, x, y, w);
+        const tt = last.t + (t - last.t) * u, w = this.air(tt).x;
+        for (const s of springs) s.step(dt, x, y, w, tt);
       }
     }
 
@@ -247,6 +304,9 @@ const Rig = (() => {
         } else if (e.kind === 'parallax') {
           // Nearer moves against the cursor, as the scene's nearer layers do.
           out[A] = -c.x * e.amount; out[A + 1] = -c.y * e.amount * 0.7;
+        } else if (e.kind === 'blink') {
+          const k = e.amount * this.shut(t, e);
+          out[A] = Math.cos(rad) * k; out[A + 1] = Math.sin(rad) * k;
         }
       });
       return out;
@@ -259,17 +319,19 @@ const Rig = (() => {
   // The shader for a list of effects whose masks are spread over `n` textures. `field(q)`
   // is how far the picture's pixel at q (its px) has been pushed.
   function fragment(effects, n) {
-    const used = effects.filter(e => e.mask);
+    const used = effects.filter(e => e.mask && e.kind !== 'blink');
     const M = e => `a${e.mask[0]}.${CH[e.mask[1]]}`;
     const hold = effects.findIndex(e => e.kind === 'hold' && e.mask);
     const sum = effects.map((e, i) => {
-      if (!e.mask || e.kind === 'hold') return '';
+      if (!e.mask || e.kind === 'hold' || e.kind === 'blink') return '';
       const A = `fx[${2 * i}]`, B = `fx[${2 * i + 1}]`, m = `${M(e)} * mix(1.0, free, ${B}.w)`;
       if (e.kind === 'swing') return `  d += turn(q - ${A}.xy, ${m} * ${A}.z);`;
       if (e.kind === 'wave') return `  d += ${m} * ripple(q, ${A}, ${B});`;
       return `  d += ${m} * ${A}.xy;`;
     }).filter(Boolean).join('\n');
     const maps = Array.from({ length: n }, (_, i) => i);
+    const blinks = effects.map((e, i) => [e, i]).filter(([e]) => e.kind === 'blink' && e.mask);
+    const lids = [...new Set(blinks.map(([e]) => e.mask[0]))];
     return `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -301,20 +363,30 @@ ${maps.map(i => `  vec4 a${i} = texture2D(m${i}, t);`).join('\n')}
   vec2 d = vec2(0.0);
 ${sum}
   return d;
-}
+}${blinks.length ? `
+// Where a blink takes its colour from instead of q: further up, by as much as is painted
+// there and as shut as the eyes are.
+vec2 lid(vec2 q) {
+  vec2 t = q / size;
+${lids.map(i => `  vec4 a${i} = texture2D(m${i}, t);`).join('\n')}
+  vec2 l = vec2(0.0);
+${blinks.map(([e, i]) => `  l += ${M(e)} * fx[${2 * i}].xy;`).join('\n')}
+  return q - l;
+}` : ''}
 vec4 shown(vec2 t) {
 ${maps.map(i => `  if (ovMap < ${i}.5) return texture2D(m${i}, t);`).join('\n')}
   return vec4(0.0);
 }
 void main() {
   vec2 p = uv * size, q = p;
-  if (still < 0.5 && ${used.length ? 'true' : 'false'}) {
+  if (still < 0.5) {${used.length ? `
     // Plain rounds first, then damped ones, which settle even where the picture is
     // stretched to more than twice its size.
     q = p - field(p);
     q = p - field(q);
     q = mix(q, p - field(q), 0.6);
-    q = mix(q, p - field(q), 0.6);
+    q = mix(q, p - field(q), 0.6);` : ''}${blinks.length ? `
+    q = lid(q); // and the eyes blink, there` : ''}
   }
   vec2 t = q / size;
   vec4 c = texture2D(pic, t) * step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);
@@ -332,7 +404,7 @@ void main() {
     const free = h >= 0 ? 1 - vals[h * 8] * at(effects[h]) : 1;
     let dx = 0, dy = 0;
     effects.forEach((e, i) => {
-      if (!e.mask || e.kind === 'hold') return;
+      if (!e.mask || e.kind === 'hold' || e.kind === 'blink') return;
       const A = i * 8, B = A + 4, m = at(e) * (1 + (free - 1) * vals[B + 3]);
       if (e.kind === 'swing') {
         const rx = q[0] - vals[A], ry = q[1] - vals[A + 1], a = m * vals[A + 2], c = Math.cos(a), s = Math.sin(a);
@@ -346,7 +418,8 @@ void main() {
     return [dx, dy];
   }
 
-  // Which pixel of the picture the shader draws at p: found the shader's way.
+  // Which pixel of the picture the shader draws at p: found the shader's way (before the
+  // eyes blink).
   function source(effects, vals, mask, p) {
     let q = p;
     for (const k of [1, 1, 0.6, 0.6]) {
@@ -354,6 +427,19 @@ void main() {
       q = [q[0] + (p[0] - d[0] - q[0]) * k, q[1] + (p[1] - d[1] - q[1]) * k];
     }
     return q;
+  }
+
+  // Where the shader takes the colour from instead of the picture's pixel q once the eyes
+  // blink (its lid()): further up, by as much as each blink is painted there and as shut
+  // as its eyes are.
+  function blinked(effects, vals, mask, q) {
+    let x = q[0], y = q[1];
+    effects.forEach((e, i) => {
+      if (e.kind !== 'blink' || !e.mask) return;
+      const m = mask(e.mask[0], q)[e.mask[1]];
+      x -= m * vals[i * 8]; y -= m * vals[i * 8 + 1];
+    });
+    return [x, y];
   }
 
   const VERT = `
@@ -520,5 +606,5 @@ void main() {
     }
   }
 
-  return { KINDS, MAX, SCALE, normalize, make, add, load, breeze, breath, Spring, Motion, Renderer, fragment, push, source };
+  return { KINDS, MAX, SCALE, normalize, make, add, load, breeze, breath, shut, Spring, Motion, Renderer, fragment, push, source, blinked };
 })();

@@ -479,6 +479,79 @@ test('rig: an effect switched off moves nothing', () => {
   });
 });
 
+test('rig: she blinks now and then, at random, quickly, now and then twice', () => {
+  const { Rig } = loadRig(), e = Rig.make('blink');
+  // Each blink (from shutting to open again), at 1 ms steps over an hour.
+  const blinks = [];
+  let open = true;
+  for (let i = 0; i < 3600 * 1000; i++) {
+    const t = i / 1000, c = Rig.shut(t, e);
+    if (c > 0 && open) blinks.push(t);
+    open = c === 0;
+  }
+  assert.ok(blinks.length > 600 && blinks.length < 1000, `${blinks.length} blinks an hour`);
+  const gaps = blinks.slice(1).map((t, i) => t - blinks[i]);
+  const doubles = gaps.filter(g => g < 3 * e.span).length;
+  assert.ok(doubles > blinks.length * 0.05 && doubles < blinks.length * 0.3, `${doubles} doubles in ${blinks.length}`);
+  const apart = gaps.filter(g => g >= 3 * e.span);
+  assert.ok(Math.min(...apart) > 0.25 * e.every - 3 * e.span, `blinks ${Math.min(...apart).toFixed(2)} s apart`);
+  assert.ok(Math.max(...apart) < 1.75 * e.every + 3 * e.span, `no blink for ${Math.max(...apart).toFixed(2)} s`);
+  // Shut for a frame or two: at 30 fps at least two frames 85% shut, at 15 fps at least one.
+  for (const fps of [30, 15]) {
+    const phase = 0.37 / fps;
+    for (const b of blinks.slice(0, 300)) {
+      let frames = 0;
+      for (let f = Math.ceil((b - phase) * fps); f / fps + phase < b + e.span; f++) if (Rig.shut(f / fps + phase, e) >= 0.85) frames++;
+      assert.ok(frames >= (fps === 30 ? 2 : 1), `${frames} shut frames at ${fps} fps for the blink at ${b.toFixed(3)}`);
+    }
+  }
+});
+
+test('rig: shut, a blink shows what is above the eye; open, it moves nothing', () => {
+  const { Rig } = loadRig();
+  const rig = Rig.normalize({ size: [100, 100], maps: ['a.png'], effects: [
+    { kind: 'hold', mask: [0, 0] }, { kind: 'blink', mask: [0, 1], amount: 20 },
+  ] });
+  // An eye at x 40..60: its lash at y 30..35 lands on 50..55; the lid above stretches down.
+  const paint = (x, y) => (x < 40 || x > 60 ? 0 : y < 20 ? 0 : y < 50 ? (y - 20) / 30 : y <= 55 ? 1 : 0);
+  const mask = (m, q) => [1, paint(q[0], q[1]), 0]; // all of it held: a blink pays that no heed
+  const blink = rig.effects[1], m = new Rig.Motion();
+  assert.ok(!('hold' in blink), 'a blink has no hold setting');
+  m.blink(100);
+  const shut = m.values(100 + blink.span * 0.42, rig.effects);
+  for (let y = 36; y <= 55; y++) {
+    const q = Rig.blinked(rig.effects, shut, mask, [50, y]);
+    assert.ok(q[1] <= 35.01 && Math.abs(q[0] - 50) < 1e-6, `${y} shows ${q[1].toFixed(2)}`);
+  }
+  for (const p of [[50, 60], [30, 50], [50, 10]]) assert.deepStrictEqual([...Rig.blinked(rig.effects, shut, mask, p)], p);
+  assert.deepStrictEqual([...Rig.push(rig.effects, shut, mask, [50, 50])], [0, 0], 'the push leaves it to the blink');
+  let t = 0;
+  while (Rig.shut(t, blink) > 0 || Math.abs(t - 100) < 1) t += 0.25;
+  assert.deepStrictEqual([...Rig.blinked(rig.effects, m.values(t, rig.effects), mask, [50, 50])], [50, 50], 'open, it moves nothing');
+  const src = Rig.fragment(rig.effects, 1);
+  assert.ok(src.includes('l += a0.g * fx[2].xy') && src.includes('q = lid(q)') && !src.includes('d += a0.g'), 'the shader blinks after the push');
+});
+
+test('rig: with Idle a spring drifts about on its own, slowly, each in its own time', () => {
+  const { Rig } = loadRig(), m = new Rig.Motion();
+  const fx = [Rig.make('swing', 'Left arm'), Rig.make('swing', 'Left forearm')];
+  for (const e of fx) { e.wind = 0; e.idle = 3; }
+  const xs = [[], []];
+  for (let i = 0; i <= 150 * 30; i++) {
+    const t = i / 30;
+    m.update(t, fx, { x: 0, y: 0 });
+    if (t > 10) fx.forEach((e, j) => xs[j].push(m.spring(e).off().x));
+  }
+  for (const x of xs) {
+    assert.ok(Math.max(...x) > 1.2 && Math.min(...x) < -1.2, `drifts ${Math.min(...x).toFixed(1)}..${Math.max(...x).toFixed(1)} px`);
+    assert.ok(Math.max(...x.slice(1).map((v, i) => Math.abs(v - x[i]))) < 0.1, 'and slowly');
+  }
+  const mean = a => a.reduce((s, v) => s + v, 0) / a.length, [ma, mb] = xs.map(mean);
+  const cov = mean(xs[0].map((v, i) => (v - ma) * (xs[1][i] - mb))), sd = (a, m0) => Math.sqrt(mean(a.map(v => (v - m0) ** 2)));
+  assert.ok(cov / sd(xs[0], ma) / sd(xs[1], mb) < 0.9, 'the two drift in step');
+  assert.strictEqual(Rig.make('sway').idle, 0, 'no drifting unless asked');
+});
+
 test('rig: the rig shipped for makise.webp fits it, and its shader reads every mask', () => {
   const { Rig } = loadRig(), rig = shippedRig(Rig), size = webpSize(path.join(IMG, 'makise.webp'));
   assert.deepStrictEqual([...rig.size], size, 'made for a picture of another size');
