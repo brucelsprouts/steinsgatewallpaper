@@ -1393,3 +1393,68 @@ git commit -m "Document the woven schematics
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+---
+
+## As built
+
+Task 1 went in as planned. Task 2 was built as written, and then changed mid-build after
+the user looked at it: the lines read as one big grid, too uniform and bunched up. They
+asked to break lines apart, not bunch them, angle them differently and dim them a
+little, "like bismuth formations". The spec was revised to match. What changed from the
+code above:
+
+- **Lines grow like a crystal**, not as one hash of upright, level and diagonal lines.
+  - `WAYS`, `rule()` and `between()` are gone. `grow()`, `seed()`, `toward()`, `branch()`
+    and `runTo()` replace them.
+  - A growth is a run of lines drawn as one stroke, one line item each. A line's `from`
+    is the line it set off from, and its `form` is its formation.
+  - What grows is chosen first, so the drawing keeps its make-up:
+    - a new formation 22%, a third of them right across the sheet;
+    - a run 30%;
+    - a step 26%;
+    - a frame 22%.
+
+    Where it goes comes second: of 24 tried, half aimed at the six barest places (3×3
+    cell blocks) from the nearest line, scored by the mean ink wanted along it.
+  - When the score alone picked the kind, the drawing drifted to short single runs:
+    median line length 345 → 280 px, total line down a quarter over 20 minutes. With
+    the kind chosen first it holds at about 110 lines and 39–49k px.
+  - A formation holding more than `BIG` (10%) of the drawing stops growing, and a run at
+    60° starts a formation of its own. At once, no 5° band of angle holds more than about
+    a quarter of the line.
+- **No twins.** `APART` = 45 px is the closest two lines running the same way may lie.
+- **Broken lines.** About a third of the lines over 350 px get one to three `gaps`.
+  `pieces()` draws around them, and shapes, crossings and glints keep out of them.
+- **Lines ruled to other lines** (`ends`, and erasing them along with those lines) was
+  tried against orphaned segments, then dropped with the grid.
+- **A ring or a dot** now and then where a growth sets off from a line, or turns.
+- `COUNT` 48 → 60 growths. The pen is slower (350–600 px/s). Hatching is lighter
+  (5–13 strokes, 16–56 px).
+- **Crossings are kept up to date** as lines come and go (`link()` and `unlink()`) and
+  aren't sorted. The full `relink()` was 3.5 ms a time and slowed the tests from 10 s
+  to 55 s.
+- **Erased lines let go** of the line they grew from and of their crossings. Otherwise
+  each line's `from` chain would keep every erased ancestor in memory.
+- The brightness in `main.js` is `0.2 * strength/50`, not 0.12. The first build (seen
+  at 0.35) was "dim a little" too bright. At 0.2 a line lifts the open dark at 1440p by
+  a median of 6 levels, and 14 at the 90th percentile.
+
+Tests, beyond the plan:
+- "woven" became "it grows like a crystal": each growth sets off from its line, square
+  to it or at 60°; at most 35% of the line at one angle at once; and, over time, no
+  angle band over 25% and at least 10 of 18 holding over 2%.
+- New: "lines apart, some broken".
+- "Spread evenly" uses percentiles: under 2% of block samples below 0.15 of the mean,
+  the barest 5% over 0.25, and never 3.5 times the mean. One long line coming or going
+  swings a block a long way.
+- `deepStrictEqual` on `phase` needs the arrays copied out of the vm.
+- The sheet test also checks that nothing long gone is kept.
+
+Measured in the browser, from the drawing's own `draw` and `update`:
+- draw: about 0.05 ms a frame (p95 0.1);
+- a sheet redraw: 0.2–0.4 ms, every few seconds;
+- planning a growth: about 0.5 ms (max 1.2).
+
+Stills are as specified: 1440p, 1080p and 4K, a motion strip, through a shift, and with
+the nixie meter.

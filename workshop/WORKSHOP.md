@@ -49,7 +49,7 @@ Every 20–60 minutes the worldline shifts: the picture tears into glitching sli
 [*][b]Cursor parallax:[/b] the deep clockwork drifts with your mouse while the nearer layers move against it
 [*][b]Click the desktop[/b] to spin the clocks and flash the meter (in Worldline mode, to trigger a full shift)
 [*]Living ink that blooms, drifts and dissolves; light shafts from a source that slowly crosses the scene; dust, smoke, light leaks and film grain
-[*]Faint drafting schematics behind everything, like the drawings in the opening: dials, orbits, constructions and branching worldlines that draw themselves on, tick, turn and swing, and erase themselves
+[*]A faint drafting drawing behind everything, like the schematics in the opening: straight lines growing like a crystal, in formations at their own angles, with rings, ticks, arcs and small dials hanging off them, slowly redrawing itself
 [*]The upper-right clock keeps Akihabara time (UTC+9)
 [/list]
 

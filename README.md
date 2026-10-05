@@ -2,8 +2,8 @@
 
 An animated desktop wallpaper: Makise Kurisu, or the glowing digits of a nixie meter
 (with their faint unlit cathodes and honeycomb, but no glass), surrounded by slowly
-turning clocks, gears and an escapement over faint drafting figures that draw
-themselves on and off, with living ink, light that pans across the scene, wandering
+turning clocks, gears and an escapement over a faint drafting drawing that slowly
+grows and redraws itself, with living ink, light that pans across the scene, wandering
 dust, faint smoke and film grain over the top.
 The nixie meter shows the time, the date or a worldline. Every so often the worldline
 shifts: the digits scramble (or the picture glitches), the clocks spin, and everything
@@ -53,7 +53,7 @@ in Lively's settings.
 | Glow strength, Glow size | 0–100: the centrepiece's glow (Makise's backlight, or the digits' bloom) and how far it spreads | 50 |
 | Ink strength | 0–100 | 50 |
 | Texture strength | 0–100: the mottled backdrop, the halftone patches and the worn print over everything | 50 |
-| Schematic strength | 0–100: the faint drafting figures behind everything (0 turns them off) | 50 |
+| Schematic strength | 0–100: the faint drafting drawing behind everything (0 turns it off) | 50 |
 | Makise motion | On, Off | On |
 | Cursor parallax | On, Off | On |
 | Worldline shifts | On, Off | On |
@@ -196,27 +196,30 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
   its middle and down the empty left edge, and a finer halftone shades Makise's coat,
   both moving with her; and over everything lies the texture of a worn print: broad,
   faint wear and a few fine scratches.
-- **Schematics** lie behind everything, like the technical drawings in the opening, in
-  faint light lines on the black: dials, dashed orbits, compass constructions, nested
-  squares, pendulums, rulers, crosshairs, long construction lines and branching
-  worldlines. Each has a life of its own, as figures do in motion graphics. It draws
-  itself on, part after part. Then it moves in its own way while it stays:
-  - a dial's ring of ticks ticks round like the clocks, an inner ring turns the other
-    way and a hand sweeps;
-  - an orbit's dashes march round, and a segment travels with a dot at its head;
-  - a construction's polygon turns inside its circle;
-  - nested squares swing in and out of line;
-  - a pendulum swings, its shaded wedges with it;
-  - a ruler's scale slides, and its index moves to and fro;
-  - crosshairs snap round an eighth of a turn;
-  - a worldline branches as it's drawn, and a pulse runs along it.
+- **Schematics** lie behind everything, like the technical drawings in the opening: one
+  faint drawing in light lines on the black, which grows like a crystal (bismuth, say).
+  Its straight lines form formations, each square to itself but set at its own angle to
+  the others, so it never reads as one grid. A formation starts with a long line, now and
+  then right across the screen, and grows off its lines:
+  - runs at right angles to them (now and then at 60°, setting off a formation of its
+    own), often stopping where they meet another line;
+  - steps: off a line and on beside it, like a crystal's terraces;
+  - three sides of a frame.
 
-  Each sits at its own depth, so the cursor moves each by its own amount, and drifts its
-  own slow way. Every few seconds the one that has been there longest (about a minute)
-  erases itself, and a new one draws itself on in the emptiest spot. So about two dozen
-  are always spread evenly, and something is always drawing on or erasing. A worldline
-  shift erases them all at once and draws a fresh set within a few seconds. The pool of
-  dark around the centrepiece dims them there.
+  No two lines running the same way lie closer than 45 px, and some long ones are
+  broken. Small shapes hang off the lines: circles strung along a line; rings, diamonds,
+  crosshairs and now and then a small dial where lines cross; ruler ticks and hatching
+  along them; compass arcs from one crossing through another; links to the next line
+  over; and a ring or a dot where a line turns or sets off.
+
+  It slowly redraws itself, as if being drafted. Every few seconds the oldest growth
+  erases itself, its shapes first, and a new one grows where the drawing is barest,
+  drawn as one stroke, its shapes appearing as the pen passes them. Glints run along the
+  lines, now and then turning where they cross, and the dials tick round like the
+  clocks. It moves only with the cursor, as one deep plane. It thins out around the
+  centrepiece and fades to nothing in the middle of it, and the right third, where the
+  clockwork is busiest, has fewer shapes. A worldline shift wipes it outward from the
+  centrepiece and grows a new one within a few seconds.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
@@ -229,9 +232,11 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
 - The bloom and the mottled backdrop work at an eighth of the size of the frame and the
   grain at half; the halftone patches and the worn print are baked once and only laid
   over.
-- The schematics are a few hundred short strokes a frame, drawn on a layer at about half a
-  px per design px (1280×720 on most screens) and laid over the frame once: about 0.6 ms a
-  frame at 2560×1440.
+- The schematics are drawn once into a cached sheet at about half a px per design px, and
+  each frame only what is drawing on, erasing, ticking or glinting is drawn over a copy
+  of it: well under a tenth of a ms a frame. The sheet is drawn afresh, in a handful of
+  strokes, only when something starts to erase (every few seconds), in a fraction of a ms,
+  and planning a new growth takes about half a ms.
 - Makise's rig is one small WebGL draw a frame (every effect in one pass), at the size
   she is shown.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
@@ -312,7 +317,7 @@ Code layout (`wallpaper/js`):
 | `paint.js` | Drafting marks, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |
 | `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, the mottled backdrop, halftone patches and worn print, bloom, lens dust, grain |
-| `schematic.js` | The schematics: faint drafting figures that draw themselves on, move each their own way and erase themselves, spread evenly behind everything |
+| `schematic.js` | The schematics: one faint drafting drawing that grows like a crystal, lines first with shapes hanging off them, slowly redrawing itself behind everything |
 | `scene.js` | Composition, depth, parallax |
 | `display.js` | What the meter shows and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |
