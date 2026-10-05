@@ -899,3 +899,39 @@ Expected: `1 failing` (the pre-existing rig test only).
 git add wallpaper/js/schematic.js wallpaper/js/main.js wallpaper/js/config.js tools/preview.html README.md workshop/WORKSHOP.md docs/superpowers
 git commit -m "Tune and document the schematic figures"
 ```
+
+---
+
+## As built
+
+The tests and tuning by eye changed these from the code above:
+
+- **Scheduling.** Random lifetimes clustered retirements, which left quiet stretches of
+  11 s and holes of 450 px. So the field now runs a steady cadence: every 2–4.5 s the
+  longest-staying figure, if it's been there 25 s (`AGE`), erases itself, and a
+  replacement starts drawing on at once (`staying()` counts the figures not yet erasing).
+  Figures have `dies: Infinity` until retired. Long construction lines keep their random
+  lives.
+- **Spot finder.** It ignores figures that are erasing, so a replacement often draws itself
+  on where one is going (a handoff), and it tries 120 places, not 40. With 40, holes of up
+  to 460 px opened in the open frame.
+- **Shift.** It also hurries figures that are already erasing, from where they've got to.
+  A slow 4 s erase outlived the 2 s check. The rush adds a figure every 0.06–0.14 s, so
+  the fresh set is whole within about 4.5 s.
+- **More, smaller figures.** `COUNT` is 24 (asked for more shapes), and every kind's size
+  range is about 0.9 of the plan's, which keeps the closest staying pair at 0.5–0.6 of
+  their combined room or more.
+- **Layer.** It's sized by design px (0.5 px per design px, between 0.4 and 1 of the
+  screen's own px), not by half the screen, so the lines look the same at 720p, 1080p and
+  1440p. At half the screen they thinned to nothing at 720p.
+- **Brightness.** The default opacity is 0.35, not 0.2. At 1440p the main strokes then sit
+  20–40 levels above the black, just below the deep clockwork.
+- **Tests.**
+  - The count test checks 23–29 figures on screen, counting those erasing, and never
+    more than 24 staying.
+  - Pile-ups are checked among staying figures only.
+  - Bare patches are measured over the open frame: inside a 240 px margin, outside three
+    quarters of the pool.
+  - The stagger order uses `<=`.
+  - `runField` passes the module to its callback.
+- **Measured.** 0.58 ms a frame at 2560×1440, 0.42 at 1920×1080 and 1.16 at 3840×2160.

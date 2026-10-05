@@ -35,8 +35,9 @@ travelling as a segment, erasing itself), stagger (parts one after another), rep
 revealed (rings of ticks), marching dashes and counter-rotating rings.
 
 - **Each figure has a life:** it draws itself on over a few seconds, its parts staggered;
-  lives for 30–70 s; then erases itself. Another draws itself on in the emptiest free
-  spot. Lives are staggered, so something is always drawing on or erasing.
+  stays about a minute; then erases itself. Every few seconds the longest-staying one
+  erases itself while another draws itself on in the emptiest free spot, so something is
+  always drawing on or erasing.
 - **Each moves its own way while it lives:**
   - dials: a tick ring ticking round a tick at a time (like the clocks), an inner ring
     turning the other way, a hand sweeping;
@@ -55,9 +56,10 @@ revealed (rings of ticks), marching dashes and counter-rotating rings.
 
 ## Spacing
 
-One layer of figures, not overlapping sheets. About 18 figures and 3 long construction
-lines at a time. A new figure goes where it's farthest from the others (allowing for their
-sizes) and from the middle of the centrepiece. So no patch piles up and none stays bare.
+One layer of figures, not overlapping sheets. About two dozen figures and 3 long
+construction lines at a time. A new figure goes where it's farthest from the others
+(allowing for their sizes) and from the middle of the centrepiece. So no patch piles up
+and none stays bare.
 
 ## Testing
 

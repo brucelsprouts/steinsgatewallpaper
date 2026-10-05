@@ -2,9 +2,9 @@
 
 An animated desktop wallpaper: Makise Kurisu, or the glowing digits of a nixie meter
 (with their faint unlit cathodes and honeycomb, but no glass), surrounded by slowly
-turning clocks, gears and an escapement over dim drafting schematics that slowly
-change, with living ink, light that pans across the scene, wandering dust, faint smoke
-and film grain over the top.
+turning clocks, gears and an escapement over faint drafting figures that draw
+themselves on and off, with living ink, light that pans across the scene, wandering
+dust, faint smoke and film grain over the top.
 The nixie meter shows the time, the date or a worldline. Every so often the worldline
 shifts: the digits scramble (or the picture glitches), the clocks spin, and everything
 settles.
@@ -53,7 +53,7 @@ in Lively's settings.
 | Glow strength, Glow size | 0–100: the centrepiece's glow (Makise's backlight, or the digits' bloom) and how far it spreads | 50 |
 | Ink strength | 0–100 | 50 |
 | Texture strength | 0–100: the mottled backdrop, the halftone patches and the worn print over everything | 50 |
-| Schematic strength | 0–100: the dim drafting sheets behind everything (0 turns them off) | 50 |
+| Schematic strength | 0–100: the faint drafting figures behind everything (0 turns them off) | 50 |
 | Makise motion | On, Off | On |
 | Cursor parallax | On, Off | On |
 | Worldline shifts | On, Off | On |
@@ -196,15 +196,27 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
   its middle and down the empty left edge, and a finer halftone shades Makise's coat,
   both moving with her; and over everything lies the texture of a worn print: broad,
   faint wear and a few fine scratches.
-- **Schematics** lie behind everything, like the technical drawings in the opening:
-  compass circles and dials, gear trains, squares, diamonds and zig-zags, construction
-  lines, rulers and scribbled graphite, in pen on grubby paper. They go in the way you'd
-  lay a scan of a drawing into Photoshop, in Lighten at a low opacity, so the black lifts
-  to a dim warm paper and the lines stay dark; the rest of the scene is drawn over them.
-  Three sheets are double-exposed: each drifts its own way, slowly zooms and turns, and
-  fades in and out over about a minute and a half, resting fully in for a while, so one
-  drawing slowly gives way to another. The pool of dark around the centrepiece dims them
-  there.
+- **Schematics** lie behind everything, like the technical drawings in the opening, in
+  faint light lines on the black: dials, dashed orbits, compass constructions, nested
+  squares, pendulums, rulers, crosshairs, long construction lines and branching
+  worldlines. Each has a life of its own, as figures do in motion graphics. It draws
+  itself on, part after part. Then it moves in its own way while it stays:
+  - a dial's ring of ticks ticks round like the clocks, an inner ring turns the other
+    way and a hand sweeps;
+  - an orbit's dashes march round, and a segment travels with a dot at its head;
+  - a construction's polygon turns inside its circle;
+  - nested squares swing in and out of line;
+  - a pendulum swings, its shaded wedges with it;
+  - a ruler's scale slides, and its index moves to and fro;
+  - crosshairs snap round an eighth of a turn;
+  - a worldline branches as it's drawn, and a pulse runs along it.
+
+  Each sits at its own depth, so the cursor moves each by its own amount, and drifts its
+  own slow way. Every few seconds the one that has been there longest (about a minute)
+  erases itself, and a new one draws itself on in the emptiest spot. So about two dozen
+  are always spread evenly, and something is always drawing on or erasing. A worldline
+  shift erases them all at once and draws a fresh set within a few seconds. The pool of
+  dark around the centrepiece dims them there.
 - The upper-right clock shows Akihabara time (UTC+9).
 
 ## Performance
@@ -217,9 +229,9 @@ picture, start a rig in the editor: it opens with just a **Hold still** to paint
 - The bloom and the mottled backdrop work at an eighth of the size of the frame and the
   grain at half; the halftone patches and the worn print are baked once and only laid
   over.
-- The schematics are baked once, three sheets at about half the frame's resolution
-  (again only if the screen size changes); each frame lays them over the frame with four
-  fills, under half a millisecond at 2560×1440.
+- The schematics are a few hundred short strokes a frame, drawn on a layer at about half a
+  px per design px (1280×720 on most screens) and laid over the frame once: about 0.6 ms a
+  frame at 2560×1440.
 - Makise's rig is one small WebGL draw a frame (every effect in one pass), at the size
   she is shown.
 - Capped at 30 fps; Wallpaper Engine's own lower frame limit is respected.
@@ -291,7 +303,7 @@ Code layout (`wallpaper/js`):
 
 | File | What it does |
 | --- | --- |
-| `kit.js` | Noise, easing, canvas helpers |
+| `kit.js` | Noise, easing, stepped motion, canvas helpers |
 | `config.js` | Settings from the URL, Lively and Wallpaper Engine |
 | `nixie.js` | The meter: glowing digits, unlit cathodes, honeycomb, bloom, haze, streak, scramble and flash (and the glass tubes and walnut base it can be shown in) |
 | `portrait.js` | The Makise centrepiece: loading the picture and its rig, grading, feathering, backlight, float, glitch |
@@ -300,7 +312,7 @@ Code layout (`wallpaper/js`):
 | `paint.js` | Drafting marks, shape helpers |
 | `ink.js` | Living ink: painting, the spreading field, motion, the schedule |
 | `atmos.js` | Dust, smoke, light shafts and pools, light leaks, textured border, the mottled backdrop, halftone patches and worn print, bloom, lens dust, grain |
-| `schematic.js` | The schematics: drafting sheets drawn in code, double-exposed and slowly changing behind everything |
+| `schematic.js` | The schematics: faint drafting figures that draw themselves on, move each their own way and erase themselves, spread evenly behind everything |
 | `scene.js` | Composition, depth, parallax |
 | `display.js` | What the meter shows and when the worldline shifts |
 | `main.js` | Start-up, render loop, input, pausing |
