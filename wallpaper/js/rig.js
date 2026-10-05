@@ -26,6 +26,10 @@
 // coming down to the bottom of the eye, and where the lid was or has passed shows skin (the
 // colour at a spot chosen on her face). So it covers the eye completely, whatever is above
 // it, where a push could only squeeze the eye and a look further up would pull hair down.
+// Or the shut eyes can be drawn: a picture of their own (img/makise-lids.png beside
+// img/makise.webp: the picture's size, transparent but for the shut lids), which is simply
+// shown over her, moving with her, for as long as each blink lasts. Then nothing comes
+// down and the blink's masks aren't needed.
 //
 // A rig lives beside its picture: img/makise.webp has img/makise-rig.js (a script, so it
 // loads from a local file too) and the masks it names.
@@ -326,9 +330,10 @@ const Rig = (() => {
   // ---------- The push: on the GPU, and the same on the CPU for the tests ----------
 
   const CH = 'rgb';
-  // The shader for a list of effects whose masks are spread over `n` textures. `field(q)`
-  // is how far the picture's pixel at q (its px) has been pushed.
-  function fragment(effects, n) {
+  // The shader for a list of effects whose masks are spread over `n` textures, and with
+  // `lids` drawn shut eyes in the texture after them. `field(q)` is how far the picture's
+  // pixel at q (its px) has been pushed.
+  function fragment(effects, n, lids = false) {
     const used = effects.filter(e => e.mask && e.kind !== 'blink');
     const M = e => `a${e.mask[0]}.${CH[e.mask[1]]}`;
     const hold = effects.findIndex(e => e.kind === 'hold' && e.mask);
@@ -340,7 +345,8 @@ const Rig = (() => {
       return `  d += ${m} * ${A}.xy;`;
     }).filter(Boolean).join('\n');
     const maps = Array.from({ length: n }, (_, i) => i);
-    const blinks = effects.map((e, i) => [e, i]).filter(([e]) => e.kind === 'blink' && e.mask && e.lid);
+    const blinks = lids ? [] : effects.map((e, i) => [e, i]).filter(([e]) => e.kind === 'blink' && e.mask && e.lid);
+    const drawn = lids ? effects.map((e, i) => [e, i]).filter(([e]) => e.kind === 'blink') : [];
     return `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -348,7 +354,7 @@ precision highp float;
 precision mediump float;
 #endif
 varying vec2 uv;
-uniform sampler2D pic${maps.map(i => `, m${i}`).join('')};
+uniform sampler2D pic${maps.map(i => `, m${i}`).join('')}${lids ? ', lids' : ''};
 uniform vec2 size;      // the picture, in its own px
 uniform float fade;     // how much of its height dissolves at the bottom
 uniform float still;    // 1 holds it still (the editor, while painting)
@@ -389,9 +395,16 @@ void main() {
     q = mix(q, p - field(q), 0.6);
   }
   vec2 t = q / size;
-  vec4 c = texture2D(pic, t) * step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);${blinks.length ? `
+  float inside = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);
+  vec4 c = texture2D(pic, t) * inside;${blinks.length ? `
   if (still < 0.5) {
 ${blinks.map(([, i]) => `    c = blink${i}(q, c);`).join('\n')}
+  }` : ''}${drawn.length ? `
+  // The drawn shut eyes, all at once for as long as a blink lasts.
+  float shut = ${drawn.map(([, i]) => `step(0.001, fx[${2 * i}].z)`).join(' + ')};
+  if (still < 0.5 && shut > 0.0) {
+    vec4 l = texture2D(lids, t) * inside;
+    c = c * (1.0 - l.a) + l;
   }` : ''}
   if (ovK > 0.0) c = mix(c, vec4(ovCol, 1.0), ovK * dot(shown(t, ovMap), ovSel));
   if (ov2K > 0.0) c = mix(c, vec4(ov2Col, 1.0), ov2K * dot(shown(t, ov2Map), ov2Sel));
@@ -521,6 +534,12 @@ vec4 blink${i}(vec2 q, vec4 c) {
     return c;
   }
 
+  // Whether drawn shut eyes show at this moment (`vals` from Motion.values): for the whole
+  // of any blink, with no in-between.
+  function lidded(effects, vals) {
+    return effects.some((e, i) => e.kind === 'blink' && vals[i * 8 + 2] > 0.001);
+  }
+
   const VERT = `
 attribute vec2 a;
 varying vec2 uv;
@@ -577,9 +596,10 @@ void main() {
       else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
     }
 
-    // The program for these effects over `n` mask textures, compiled once for each layout.
+    // The program for these effects over `n` mask textures (and the drawn shut eyes after
+    // them, if there are some), compiled once for each layout.
     use(effects, n) {
-      const gl = this.gl, src = fragment(effects, n);
+      const gl = this.gl, src = fragment(effects, n, this.lids);
       let p = this.progs.get(src);
       if (!p) {
         const shader = (type, text) => {
@@ -595,7 +615,7 @@ void main() {
         gl.linkProgram(prog);
         if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
         const u = {};
-        for (const k of ['pic', 'size', 'fade', 'still', 'fx', 'ovK', 'ovMap', 'ovSel', 'ovCol', 'ov2K', 'ov2Map', 'ov2Sel', 'ov2Col', ...Array.from({ length: n }, (_, i) => `m${i}`)]) {
+        for (const k of ['pic', 'size', 'fade', 'still', 'fx', 'ovK', 'ovMap', 'ovSel', 'ovCol', 'ov2K', 'ov2Map', 'ov2Sel', 'ov2Col', 'lids', ...Array.from({ length: n }, (_, i) => `m${i}`)]) {
           u[k] = gl.getUniformLocation(prog, k);
         }
         p = { prog, u, a: gl.getAttribLocation(prog, 'a') };
@@ -606,6 +626,7 @@ void main() {
       gl.vertexAttribPointer(p.a, 2, gl.FLOAT, false, 0, 0);
       gl.uniform1i(p.u.pic, 0);
       for (let i = 0; i < n; i++) gl.uniform1i(p.u[`m${i}`], i + 1);
+      if (this.lids) gl.uniform1i(p.u.lids, n + 1);
       this.p = p;
       this.n = n;
     }
@@ -613,8 +634,9 @@ void main() {
     // Take a picture to bring to life: `pic` (a canvas or image, at the size it's to be
     // drawn), its masks (`maps`, covering the same part of it, at any size) and the
     // effects; `size` is that part of the picture in its own px and `fade` how much of
-    // its height dissolves at the bottom. False if they can't be used.
-    set(pic, maps, effects, { size, fade = 0 }) {
+    // its height dissolves at the bottom; `lids`, if given, the drawn shut eyes (graded and
+    // sized as `pic` is). False if they can't be used.
+    set(pic, maps, effects, { size, fade = 0, lids = null }) {
       this.ok = false;
       try {
         if (!this.init()) return false;
@@ -625,6 +647,9 @@ void main() {
         gl.viewport(0, 0, pic.width, pic.height);
         this.texture(0, pic, true);
         maps.forEach((m, i) => this.texture(i + 1, m, false));
+        this.lids = !!lids;
+        this.lidsPic = lids;
+        if (lids) this.texture(maps.length + 1, lids, true);
         this.use(effects, maps.length);
         this.size = size;
         this.fade = fade;
@@ -635,13 +660,15 @@ void main() {
       return this.ok;
     }
 
-    // The editor's changes: another picture (or grading or fade) ...
-    picture(pic, { size, fade = 0 }) {
+    // The editor's changes: another picture (or grading or fade), with its drawn shut eyes
+    // graded alike ...
+    picture(pic, { size, fade = 0, lids = null }) {
       if (!this.ok) return;
       this.canvas.width = pic.width;
       this.canvas.height = pic.height;
       this.gl.viewport(0, 0, pic.width, pic.height);
       this.texture(0, pic, true);
+      if (lids && this.lids) { this.lidsPic = lids; this.texture(this.n + 1, lids, true); }
       this.size = size;
       this.fade = fade;
     }
@@ -657,10 +684,14 @@ void main() {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, src.width, src.height, gl.RGBA, gl.UNSIGNED_BYTE, src.data);
     }
 
-    // ... and another list of effects, or of masks.
+    // ... and another list of effects, or of masks (which moves the drawn shut eyes along
+    // to the texture after them).
     effects(effects, n) {
       if (!this.ok) return;
-      try { this.use(effects, n); } catch (e) { this.ok = false; }
+      try {
+        if (this.lids && n !== this.n && this.lidsPic) this.texture(n + 1, this.lidsPic, true);
+        this.use(effects, n);
+      } catch (e) { this.ok = false; }
     }
 
     // Draw a moment, given Motion.values() for it. The editor may hold the picture still
@@ -688,5 +719,5 @@ void main() {
     }
   }
 
-  return { KINDS, MAX, SCALE, STEP, REACH, slots, normalize, make, add, load, breeze, breath, shut, Spring, Motion, Renderer, fragment, push, source, blinked };
+  return { KINDS, MAX, SCALE, STEP, REACH, slots, normalize, make, add, load, breeze, breath, shut, Spring, Motion, Renderer, fragment, push, source, blinked, lidded };
 })();

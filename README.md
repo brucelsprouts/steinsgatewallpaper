@@ -110,6 +110,15 @@ it the upper lid, the dark lash. Blinking, the lid comes down over the eye, in e
 until its lower edge reaches the bottom of the eye, and where it was or has passed shows
 her skin, taken from a spot on her cheek and shaded a little under her hair.
 
+Or the shut eyes can be drawn by hand instead: `makise-lids.png` beside `makise.webp`,
+the same size as it (866 × 1734), transparent everywhere but the shut eyes. For as long
+as each blink lasts (its **Length**, 0.16 s: about ten frames) it simply shows over her,
+whole, with nothing in between, and moves with her as she breathes and turns. To make it,
+open `makise.webp` in a paint program, draw the shut lids (the dark upper lash, and skin
+over the eye above it) on a new layer, hide the picture and export just that layer as a
+PNG with transparency. While it's there, the blink's eye and lid masks aren't used; take
+it away and the painted lid comes down as before.
+
 The rig is `makise-rig.js` beside `makise.webp`, with the masks it names
 (`makise-rig-0.png` and so on, three masks to a picture: red, green and blue, at half
 the picture's size; a blink has two). A picture's rig is always `<its name>-rig.js` beside it, and it

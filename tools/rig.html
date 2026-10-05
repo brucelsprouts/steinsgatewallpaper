@@ -200,6 +200,7 @@ const BG = '#070605';
 
 const ed = {
   img: null, src: null, crop: 1, W: 0, H: 0, Hs: 0, fit: 1, rigUrl: '',
+  lids: null,                       // the drawn shut eyes (makise-lids.png), if there are some
   mw: 0, mh: 0, sh: 0,             // the masks' size, and how many of their rows are shown
   effects: [], sel: null, ids: 1,
   part: 'eye',                      // which of a blink's masks the brush paints: 'eye' or 'lid'
@@ -233,7 +234,9 @@ async function start() {
   ed.rigUrl = Portrait.rigFor(ed.src.src);
   $('#pic').textContent = `${ed.src.src.split('/').pop()} · ${ed.W}×${ed.H}${ed.crop < 1 ? `, the top ${Math.round(ed.crop * 100)}% shown` : ''}`;
   ed.effects = read(portrait.rig);
+  ed.lids = portrait.rig ? portrait.rig.lids : null;
   if (!portrait.rig) say(`No rig for this picture yet: ${ed.rigUrl.split('/').pop()} will be made when you save`);
+  else if (ed.lids) say(`Blinks show the drawn shut eyes, ${Portrait.lidsFor(ed.src.src).split('/').pop()}: their eye and lid masks aren't used`);
   pack();
   if (!ed.renderer.set(picture(), ed.maps, ed.effects, fitting())) {
     return fail('WebGL is not available here (or refused the picture), so the rig cannot be shown.');
@@ -282,15 +285,15 @@ const slotsUsed = (effects = ed.effects) => effects.reduce((n, e) => n + Rig.slo
 const handle = e => e && KINDS[e.kind].point;
 
 // The picture as it's shown: as it is, or graded the way the wallpaper grades it.
-function picture() {
+function picture(img = ed.img) {
   if (ed.look === 'plain') {
-    const c = Kit.canvas(ed.W, ed.Hs);
-    c.getContext('2d').drawImage(ed.img, 0, 0, ed.W, ed.Hs, 0, 0, ed.W, ed.Hs);
+    const c = Kit.canvas(ed.W, ed.Hs), w = img.naturalWidth, h = img.naturalHeight * ed.crop;
+    c.getContext('2d').drawImage(img, 0, 0, w, h, 0, 0, ed.W, ed.Hs);
     return c;
   }
-  return Portrait.graded(ed.img, ed.crop, ed.W, ed.Hs, Portrait.GRADE[ed.look]);
+  return Portrait.graded(img, ed.crop, ed.W, ed.Hs, Portrait.GRADE[ed.look]);
 }
-const fitting = () => ({ size: [ed.W, ed.H * ed.crop], fade: ed.look === 'plain' ? 0 : Portrait.BOX.fade });
+const fitting = () => ({ size: [ed.W, ed.H * ed.crop], fade: ed.look === 'plain' ? 0 : Portrait.BOX.fade, lids: ed.lids && picture(ed.lids) });
 
 // ---------- The masks on the GPU ----------
 // Every mask packed into textures, three to each, in the order of the list (a blink's eye,

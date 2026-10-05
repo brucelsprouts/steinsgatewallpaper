@@ -590,6 +590,24 @@ test('rig: a shut lid takes the colour of its skin spot, shaded warm, most under
   assert.ok(top[1] < low[1] - 0.05, 'darker at its top');
 });
 
+test('rig: drawn shut eyes show whole for all of each blink, and not at all otherwise', () => {
+  const { Rig, Portrait } = loadRig(), { rig } = drawnEye(Rig);
+  const blink = rig.effects[1], m = new Rig.Motion();
+  assert.strictEqual(Portrait.lidsFor('img/makise.webp'), 'img/makise-lids.png');
+  m.blink(100);
+  const during = [0.01, 0.2, 0.5, 0.8, 0.99].map(u => Rig.lidded(rig.effects, m.values(100 + blink.span * u, rig.effects)));
+  assert.deepStrictEqual(during, [true, true, true, true, true], 'shut all through the blink, with no in-between');
+  let t = 1000;
+  while (Rig.shut(t, blink) > 0) t += 0.25;
+  assert.ok(!Rig.lidded(rig.effects, m.values(t, rig.effects)), 'open, they don\'t show');
+  blink.on = false;
+  assert.ok(!Rig.lidded(rig.effects, m.values(100 + blink.span * 0.5, rig.effects)), 'a blink switched off shows nothing');
+  const src = Rig.fragment(rig.effects, 1, true);
+  assert.ok(src.includes(', lids;') && src.includes('step(0.001, fx[2].z)') && src.includes('texture2D(lids, t)'), 'the shader lays them over the pushed picture');
+  assert.ok(!src.includes('vec4 blink1('), 'the lid no longer comes down');
+  assert.ok(!Rig.fragment(rig.effects, 1).includes('lids'), 'without them, the lid comes down as before');
+});
+
 test('rig: with Idle a spring drifts about on its own, slowly, each in its own time', () => {
   const { Rig } = loadRig(), m = new Rig.Motion();
   const fx = [Rig.make('swing', 'Left arm'), Rig.make('swing', 'Left forearm')];

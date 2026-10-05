@@ -26,6 +26,9 @@ const Portrait = (() => {
     { src: 'img/placeholder.webp' },
   ];
   const rigFor = src => src.replace(/\.\w+$/, '') + '-rig.js';
+  // Its shut eyes, if they've been drawn: img/makise.webp's are img/makise-lids.png, the
+  // picture's size, transparent but for the shut lids. Its blinks show them.
+  const lidsFor = src => src.replace(/\.\w+$/, '') + '-lids.png';
   // Where it stands, in design px: centred on `cx`, its foot on `bottom` (a little below
   // the frame, so its lower edge never shows), fitted inside maxW x maxH. `feather`
   // softens the sides and top (a fraction of its size); `fade` dissolves its lower part.
@@ -95,15 +98,18 @@ const Portrait = (() => {
     img.src = src;
   });
 
-  // A picture's rig with its masks loaded (`images`), or null if it has none or the rig
-  // was made for another picture (it names the size of its own).
+  // A picture's rig with its masks loaded (`images`) and its drawn shut eyes (`lids`, or
+  // null), or null if it has none or the rig was made for another picture (it names the
+  // size of its own).
   async function fetchRig(src, img) {
     const url = rigFor(src), rig = await Rig.load(url);
     if (!rig || !rig.size || rig.size[0] !== img.naturalWidth || rig.size[1] !== img.naturalHeight) return null;
     const dir = url.slice(0, url.lastIndexOf('/') + 1), aspect = img.naturalWidth / img.naturalHeight;
     const images = await Promise.all(rig.maps.map(m => fetchImage(dir + m)));
     if (!images.every(m => m && Math.abs(m.naturalWidth / m.naturalHeight / aspect - 1) < 0.02)) return null;
-    return { ...rig, images };
+    let lids = await fetchImage(lidsFor(src));
+    if (lids && Math.abs(lids.naturalWidth / lids.naturalHeight / aspect - 1) >= 0.02) lids = null;
+    return { ...rig, images, lids };
   }
 
   class Portrait {
@@ -198,7 +204,8 @@ const Portrait = (() => {
       // the picture's own px.
       let sway = false;
       if (this.rig) {
-        sway = this.warp.set(pic, this.rig.images.map(m => cut(m, crop)), this.rig.effects, { size: [sw, sh], fade: BOX.fade });
+        const lids = this.rig.lids && graded(this.rig.lids, crop, W, H, gr);
+        sway = this.warp.set(pic, this.rig.images.map(m => cut(m, crop)), this.rig.effects, { size: [sw, sh], fade: BOX.fade, lids });
       }
       this.sp = { c, glow, pad, w, h, sway };
     }
@@ -272,5 +279,5 @@ const Portrait = (() => {
   }
 
   // The rest is for tools/rig.html, which shows the picture as the wallpaper does.
-  return { Portrait, BOX, FOCUS, FIGURE, SOURCES, GRADE, rigFor, fitOf, pose, graded, fetchImage };
+  return { Portrait, BOX, FOCUS, FIGURE, SOURCES, GRADE, rigFor, lidsFor, fitOf, pose, graded, fetchImage };
 })();
