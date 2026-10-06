@@ -1,0 +1,89 @@
+{
+  "contentrating": "Everyone",
+  "description": "Makise Kurisu among slowly turning clockwork, living paint and drifting light, or a nixie divergence meter showing the time, the date or a worldline. Move the mouse for parallax; click to shift worldlines.",
+  "file": "index.html",
+  "general": {
+    "properties": {
+      "centre": {
+        "order": 99,
+        "text": "Centrepiece",
+        "type": "combo",
+        "value": "makise",
+        "options": [
+          { "label": "Makise Kurisu", "value": "makise" },
+          { "label": "Nixie meter: time", "value": "time" },
+          { "label": "Nixie meter: date", "value": "date" },
+          { "label": "Nixie meter: worldline", "value": "worldline" }
+        ]
+      },
+      "glow": {
+        "order": 100,
+        "text": "Glow strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "glowSize": {
+        "order": 101,
+        "text": "Glow size",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "ink": {
+        "order": 102,
+        "text": "Ink strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "texture": {
+        "order": 103,
+        "text": "Texture strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "schematic": {
+        "order": 104,
+        "text": "Schematic strength",
+        "type": "slider",
+        "min": 0,
+        "max": 100,
+        "value": 50
+      },
+      "motion": {
+        "order": 105,
+        "text": "Makise motion",
+        "type": "bool",
+        "value": true,
+        "condition": "centre.value == 'makise'"
+      },
+      "parallax": {
+        "order": 106,
+        "text": "Cursor parallax",
+        "type": "bool",
+        "value": true
+      },
+      "shift": {
+        "order": 107,
+        "text": "Worldline shifts",
+        "type": "bool",
+        "value": true
+      }
+    }
+  },
+  "preview": "preview.gif",
+  "tags": [
+    "Anime",
+    "Game",
+    "Sci-Fi"
+  ],
+  "title": "Steins;Gate — Divergence Meter & Makise Kurisu",
+  "type": "web",
+  "visibility": "private"
+}

@@ -1,0 +1,12 @@
+mockups/shots/
+shots/
+*.log
+Thumbs.db
+dist/
+.DS_Store
+
+# Not for the public repo
+.claude/
+docs/superpowers/
+*.psd
+wallpaper/img/makise.webp

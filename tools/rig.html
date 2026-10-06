@@ -1,0 +1,1048 @@
+<!doctype html>
+<!-- Rig editor: paint how each part of the Makise picture moves, the way Wallpaper Engine's
+     effect masks are painted, and watch it move as it will on the desktop. Serve the repo
+     (node tools/serve.js) and open http://localhost:5173/tools/rig.html. Save writes the rig
+     beside the picture (wallpaper/img/makise-rig.js and its masks).
+     Keys: B paint, E erase, S smooth, [ ] brush size, Shift+[ ] softness, 1-9 and 0
+     strength, Alt+click picks a strength up, M mask, L a blink's eye or lid, Space play, F fit,
+     G gust, K blink, W wander, Up/Down another effect, Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo,
+     Ctrl+S save. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rig editor</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0908; --panel: #131010; --raised: #1c1816; --line: #2b2421; --hover: #4a3b32;
+    --text: #ddd2c7; --dim: #8b7f76; --glow: #ffa04d; --on: #3b2617; --bad: #ff8a7a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg); color: var(--text); font: 13px/1.35 'Segoe UI', system-ui, sans-serif;
+  }
+  header, footer { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--panel); }
+  header { border-bottom: 1px solid var(--line); }
+  footer { border-top: 1px solid var(--line); color: var(--dim); font: 12px Consolas, 'Cascadia Mono', monospace; }
+  header b { font-size: 14px; }
+  #pic { color: var(--dim); }
+  #msg { color: var(--glow); margin-left: auto; text-align: right; }
+  #msg.bad { color: var(--bad); }
+  main { flex: 1; display: flex; min-height: 0; }
+  aside { width: 270px; flex: none; overflow-y: auto; background: var(--panel); padding: 10px 12px 16px; }
+  #left { border-right: 1px solid var(--line); width: 230px; }
+  #right { border-left: 1px solid var(--line); }
+  #stage { position: relative; flex: 1; min-width: 0; overflow: hidden; background: #070605; }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  #view.paint { cursor: none; }
+  #view.pan { cursor: grabbing; }
+  #view.pivot { cursor: move; }
+  #readout {
+    position: absolute; left: 10px; bottom: 8px; padding: 3px 8px; border-radius: 6px;
+    background: rgba(19, 16, 16, 0.85); color: var(--dim); font: 12px Consolas, 'Cascadia Mono', monospace;
+    pointer-events: none;
+  }
+  #readout:empty { display: none; }
+  #fail { position: absolute; inset: 0; display: grid; place-items: center; padding: 30px; text-align: center; color: var(--bad); }
+  h2 { margin: 14px 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); }
+  h2:first-child { margin-top: 2px; }
+  h3 { margin: 2px 0 2px; font-size: 15px; font-weight: 600; }
+  h3 small { color: var(--dim); font-weight: normal; font-size: 12px; margin-left: 6px; }
+  p { margin: 4px 0 8px; color: var(--dim); font-size: 12px; }
+  button, select, input[type=text], input[type=number] {
+    font: inherit; color: var(--text); background: var(--raised);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled), select:hover { border-color: var(--hover); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { background: var(--on); color: var(--glow); border-color: #5a3a22; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--glow); outline-offset: 1px; }
+  header a { color: var(--dim); margin-left: 6px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; }
+  .seg button:first-child { border-left: 0; }
+  .seg button[aria-pressed="true"] { background: var(--on); color: var(--glow); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+  .check { display: flex; align-items: center; gap: 6px; margin: 5px 0; cursor: pointer; }
+  .check input { accent-color: var(--glow); margin: 0; }
+  .field { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .field input[type=text] { flex: 1; min-width: 0; }
+  .param { display: grid; grid-template-columns: 74px 1fr 58px; align-items: center; gap: 4px 8px; margin: 3px 0; }
+  .param label { color: var(--dim); font-size: 12px; cursor: help; }
+  .param input[type=range] { width: 100%; accent-color: var(--glow); margin: 0; }
+  .param .num { display: flex; align-items: center; gap: 2px; }
+  .param input[type=number] { width: 100%; padding: 2px 4px; font-size: 12px; -moz-appearance: textfield; }
+  .param input[type=number]::-webkit-inner-spin-button { display: none; }
+  .param .unit { color: var(--dim); font-size: 11px; min-width: 14px; }
+  .arrow { display: inline-block; color: var(--glow); }
+  #effects { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 10px; }
+  .fx {
+    display: grid; grid-template-columns: 22px 10px 1fr auto; align-items: center; gap: 6px;
+    padding: 4px 6px; border-radius: 6px; border: 1px solid transparent; cursor: pointer;
+  }
+  .fx:hover { background: var(--raised); }
+  .fx[aria-selected="true"] { background: var(--on); border-color: #5a3a22; }
+  .fx .eye { padding: 0; width: 22px; height: 20px; border: 0; background: none; color: var(--text); font-size: 13px; }
+  .fx.off .eye { color: var(--dim); }
+  .fx.off .name { color: var(--dim); text-decoration: line-through; }
+  .fx .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .fx .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx .kind { color: var(--dim); font-size: 11px; }
+  .add { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .add button { text-align: left; }
+  .add button::before { content: '+ '; color: var(--glow); }
+  #pad {
+    position: relative; width: 100%; aspect-ratio: 16 / 9; margin: 6px 0; border-radius: 6px;
+    background: var(--raised); border: 1px solid var(--line); cursor: crosshair; touch-action: none;
+  }
+  #pad::before, #pad::after { content: ''; position: absolute; background: var(--line); }
+  #pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+  #pad::after { top: 50%; left: 0; right: 0; height: 1px; }
+  #dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--glow); z-index: 1; }
+  .note { color: var(--dim); font-size: 12px; }
+  kbd { font: 11px Consolas, 'Cascadia Mono', monospace; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--raised); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <b>Rig editor</b><span id="pic">loading…</span>
+  <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+  <button id="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+  <span id="msg"></span>
+  <button id="revert" title="Throw away what hasn't been saved">Revert</button>
+  <button id="download" title="The rig's files in a zip, to put in wallpaper/img/ by hand">Download</button>
+  <button id="save" class="primary" title="Write the rig beside the picture (Ctrl+S)">Save</button>
+  <a href="preview.html">Preview</a>
+</header>
+<main>
+  <aside id="left">
+    <h2>Effects</h2>
+    <p>Each effect moves the parts of the picture painted for it, more where it's painted
+      stronger. Nothing is cut out, so nothing tears: around what moves the picture stretches
+      to follow. <b>Hold still</b> keeps what's painted on it from bending.</p>
+    <div id="effects"></div>
+    <h2>Add</h2>
+    <div class="add">
+      <button data-add="sway" title="Trails behind as she drifts, and blows in the breeze: hair">Sway</button>
+      <button data-add="swing" title="Turns about a pivot as it trails and blows: an arm in its sleeve">Swing</button>
+      <button data-add="wave" title="Ripples running across it: hair, loose cloth">Waves</button>
+      <button data-add="breathe" title="Rises and falls with each breath">Breathe</button>
+      <button data-add="parallax" title="Shifts with the cursor, as if nearer or farther">Parallax</button>
+      <button data-add="blink" title="Shuts the eyes now and then: the lid you paint comes down over the eye you paint">Blink</button>
+      <button data-add="hold" title="What must never bend">Hold still</button>
+    </div>
+  </aside>
+  <div id="stage"><canvas id="view"></canvas><div id="readout"></div><div id="fail" hidden></div></div>
+  <aside id="right">
+    <section id="props"></section>
+    <h2>Brush</h2>
+    <div class="row">
+      <div class="seg" id="mode">
+        <button data-v="paint" title="Paint the strength on (B)">Paint</button>
+        <button data-v="erase" title="Take it off (E)">Erase</button>
+        <button data-v="smooth" title="Soften its edges (S)">Smooth</button>
+      </div>
+    </div>
+    <div id="brush"></div>
+    <div class="row">
+      <button id="fill" title="Paint the whole mask at the brush's strength">Fill</button>
+      <button id="clear" title="Clear the whole mask">Clear</button>
+      <button id="invert" title="Strong where it was weak and weak where it was strong">Invert</button>
+      <button id="blur" title="Soften the edges of the whole mask">Smooth all</button>
+    </div>
+    <h2>Preview</h2>
+    <div class="row">
+      <button id="play" title="Play or pause the motion (Space)">Pause</button>
+      <label class="check"><input type="checkbox" id="showmask" checked> Show mask <kbd>M</kbd></label>
+    </div>
+    <div class="field">
+      <span class="note">Look</span>
+      <select id="look">
+        <option value="plain">The picture as it is</option>
+        <option value="warm">As on the desktop, orange</option>
+        <option value="cold">As on the desktop, white</option>
+      </select>
+    </div>
+    <div class="row">
+      <span class="note">Speed</span>
+      <div class="seg" id="speed"><button data-v="0.25">¼×</button><button data-v="0.5">½×</button><button data-v="1">1×</button><button data-v="2">2×</button></div>
+    </div>
+    <p>The cursor on the desktop: drag it about to see her drift and her hair trail, and
+      the parallax. Double-click to centre it.</p>
+    <div id="pad" title="Where the cursor is on the desktop"><div id="dot"></div></div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="wander"> Wander <kbd>W</kbd></label>
+      <button id="flick" title="Throw the cursor across the screen">Flick</button>
+      <button id="gust" title="A gust of wind now (G)">Gust</button>
+      <button id="blink" title="A blink now (K)">Blink</button>
+    </div>
+  </aside>
+</main>
+<footer>B paint · E erase · S smooth · [ ] size · 1–0 strength · Alt+click picks strength · M mask · L eye/lid · Space play · F fit · G gust · K blink · W wander · wheel zoom · right-drag pan · Ctrl+Z undo · Ctrl+S save</footer>
+<script src="../wallpaper/js/kit.js"></script>
+<script src="../wallpaper/js/rig.js"></script>
+<script src="../wallpaper/js/portrait.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const { KINDS, SCALE } = Rig;
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+// How the wallpaper's scene drifts her with the cursor (scene.js: parallax travel P times
+// her depth, and how long her depth plane takes to catch up), so the springs trail alike.
+const DRIFT = 42 * 0.3, LAG = 0.78;
+const BG = '#070605';
+
+const ed = {
+  img: null, src: null, crop: 1, W: 0, H: 0, Hs: 0, fit: 1, rigUrl: '',
+  lids: null,                       // the drawn shut eyes (makise-lids.png), if there are some
+  mw: 0, mh: 0, sh: 0,             // the masks' size, and how many of their rows are shown
+  effects: [], sel: null, ids: 1,
+  part: 'eye',                      // which of a blink's masks the brush paints: 'eye' or 'lid'
+  maps: [],                         // the masks as the GPU has them: RGBA bytes, three to each
+  renderer: new Rig.Renderer(), motion: new Rig.Motion(),
+  view: { k: 1, x: 0, y: 0 },       // screen px per picture px, and where its corner is
+  brush: { mode: 'paint', size: 60, strength: 1, soft: 0.6, opacity: 1 },
+  play: true, mask: true, look: 'plain', speed: 1,
+  cursor: { x: 0, y: 0 }, cam: { x: 0, y: 0 }, wander: false,
+  t: 0, dirty: false, undo: [], redo: [],
+  mouse: null, stroke: null, drag: null, pan: null, upload: null,
+};
+
+function say(text, bad) {
+  const m = $('#msg');
+  m.textContent = text;
+  m.classList.toggle('bad', !!bad);
+  clearTimeout(say.t);
+  if (text) say.t = setTimeout(() => { m.textContent = ''; }, bad ? 9000 : 5000);
+}
+function fail(text) { const f = $('#fail'); f.textContent = text; f.hidden = false; }
+function dirty() { ed.dirty = true; $('#save').textContent = 'Save*'; }
+
+// ---------- Loading: the picture the wallpaper shows, and its rig ----------
+async function start() {
+  const portrait = new Portrait.Portrait(Portrait.SOURCES.map(s => ({ ...s, src: '../wallpaper/' + s.src })));
+  if (!await portrait.load()) return fail('No picture could be loaded from wallpaper/img/. Serve the repo with node tools/serve.js and open this page from it.');
+  Object.assign(ed, { src: portrait.src, img: portrait.img, crop: portrait.src.crop || 1, fit: portrait.fit });
+  ed.W = ed.img.naturalWidth; ed.H = ed.img.naturalHeight; ed.Hs = Math.round(ed.H * ed.crop);
+  ed.mw = Math.ceil(ed.W * SCALE); ed.mh = Math.ceil(ed.H * SCALE); ed.sh = Math.round(ed.mh * ed.crop);
+  ed.rigUrl = Portrait.rigFor(ed.src.src);
+  $('#pic').textContent = `${ed.src.src.split('/').pop()} · ${ed.W}×${ed.H}${ed.crop < 1 ? `, the top ${Math.round(ed.crop * 100)}% shown` : ''}`;
+  ed.effects = read(portrait.rig);
+  ed.lids = portrait.rig ? portrait.rig.lids : null;
+  if (!portrait.rig) say(`No rig for this picture yet: ${ed.rigUrl.split('/').pop()} will be made when you save`);
+  else if (ed.lids) say(`Blinks show the drawn shut eyes, ${Portrait.lidsFor(ed.src.src).split('/').pop()}: their eye and lid masks aren't used`);
+  pack();
+  if (!ed.renderer.set(picture(), ed.maps, ed.effects, fitting())) {
+    return fail('WebGL is not available here (or refused the picture), so the rig cannot be shown.');
+  }
+  select(ed.effects.find(e => e.kind !== 'hold') || ed.effects[0] || null);
+  resize();
+  fitView();
+  list();
+  requestAnimationFrame(frame);
+}
+
+// Each effect's mask (and a blink's lid) out of the rig's PNGs, at the editor's size (the
+// rows shown only).
+function read(rig) {
+  const pixels = (rig ? rig.images : []).map(img => {
+    const c = Kit.canvas(ed.mw, ed.mh), cg = c.getContext('2d');
+    cg.drawImage(img, 0, 0, ed.mw, ed.mh);
+    return cg.getImageData(0, 0, ed.mw, ed.sh).data;
+  });
+  const fill = (data, slot) => {
+    const px = slot && pixels[slot[0]];
+    if (px) for (let i = 0, c = slot[1]; i < data.length; i++) data[i] = px[i * 4 + c] / 255;
+    return data;
+  };
+  const effects = rig ? rig.effects : [Rig.make('hold')];
+  for (const e of effects) {
+    e.id = ed.ids++;
+    e.data = fill(new Float32Array(ed.mw * ed.sh), e.mask);
+    if (e.kind === 'blink') e.lidPaint = { data: fill(new Float32Array(ed.mw * ed.sh), e.lid), mask: null, centre: null };
+  }
+  return effects;
+}
+
+// The masks: every effect has one (`data`, painted over the picture, and `mask`, where it
+// is packed), a blink a second for its lid (`lidPaint`, shaped the same).
+const layersOf = e => (e.lidPaint ? [e, e.lidPaint] : [e]);
+// The effect a mask belongs to.
+const owner = l => ed.effects.find(e => e === l || e.lidPaint === l) || null;
+// The mask the brush paints: the chosen effect's, or a blink's lid.
+const layer = () => (ed.sel && ed.part === 'lid' && ed.sel.lidPaint) || ed.sel;
+// What it's called, for messages.
+const layerName = l => { const e = owner(l); return e && e.lidPaint === l ? `${e.name}'s lid` : e && e.lidPaint ? `${e.name}'s eye` : e ? e.name : ''; };
+// How many masks the effects take, of the most a rig can have.
+const slotsUsed = (effects = ed.effects) => effects.reduce((n, e) => n + Rig.slots(e.kind), 0);
+// A swing's pivot or a blink's skin spot: the setting named, or undefined.
+const handle = e => e && KINDS[e.kind].point;
+
+// The picture as it's shown: as it is, or graded the way the wallpaper grades it.
+function picture(img = ed.img) {
+  if (ed.look === 'plain') {
+    const c = Kit.canvas(ed.W, ed.Hs), w = img.naturalWidth, h = img.naturalHeight * ed.crop;
+    c.getContext('2d').drawImage(img, 0, 0, w, h, 0, 0, ed.W, ed.Hs);
+    return c;
+  }
+  return Portrait.graded(img, ed.crop, ed.W, ed.Hs, Portrait.GRADE[ed.look]);
+}
+const fitting = () => ({ size: [ed.W, ed.H * ed.crop], fade: ed.look === 'plain' ? 0 : Portrait.BOX.fade, lids: ed.lids && picture(ed.lids) });
+
+// ---------- The masks on the GPU ----------
+// Every mask packed into textures, three to each, in the order of the list (a blink's eye,
+// then its lid).
+function pack() {
+  ed.maps = Array.from({ length: Math.max(1, Math.ceil(slotsUsed() / 3)) }, () => ({ width: ed.mw, height: ed.sh, data: new Uint8Array(ed.mw * ed.sh * 4) }));
+  let n = 0;
+  for (const e of ed.effects) {
+    e.mask = [Math.floor(n / 3), n++ % 3];
+    if (e.lidPaint) e.lid = e.lidPaint.mask = [Math.floor(n / 3), n++ % 3];
+    for (const l of layersOf(e)) bytes(l, 0, 0, ed.mw, ed.sh);
+  }
+  ed.upload = null; // they all go up together
+}
+// The list of effects changed: pack the masks again and hand everything over.
+function rebuild() {
+  pack();
+  ed.renderer.set(picture(), ed.maps, ed.effects, fitting());
+  list();
+}
+// Part of a mask into its texture's bytes ...
+function bytes(e, x, y, w, h) {
+  const d = ed.maps[e.mask[0]].data, c = e.mask[1], mw = ed.mw;
+  for (let j = y; j < y + h; j++) {
+    for (let i = x, o = j * mw + x; i < x + w; i++, o++) d[o * 4 + c] = Math.round(e.data[o] * 255);
+  }
+  e.centre = null;
+}
+// ... and up to the GPU with the next frame.
+function write(e, x, y, w, h) {
+  if (!owner(e)) return;
+  bytes(e, x, y, w, h);
+  const u = ed.upload, m = e.mask[0];
+  if (u && u.m === m) {
+    const x1 = Math.max(u.x + u.w, x + w), y1 = Math.max(u.y + u.h, y + h);
+    u.x = Math.min(u.x, x); u.y = Math.min(u.y, y); u.w = x1 - u.x; u.h = y1 - u.y;
+  } else {
+    flush();
+    ed.upload = { m, x, y, w, h };
+  }
+}
+function flush() {
+  const u = ed.upload;
+  if (!u) return;
+  ed.upload = null;
+  const src = ed.maps[u.m].data, part = new Uint8Array(u.w * u.h * 4);
+  for (let j = 0; j < u.h; j++) part.set(src.subarray(((u.y + j) * ed.mw + u.x) * 4, ((u.y + j) * ed.mw + u.x + u.w) * 4), j * u.w * 4);
+  ed.renderer.map(u.m, { width: u.w, height: u.h, data: part }, u.x, u.y);
+}
+
+// ---------- The view ----------
+const cv = $('#view'), g = cv.getContext('2d');
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(cv.clientWidth * dpr);
+  cv.height = Math.round(cv.clientHeight * dpr);
+}
+function fitView() {
+  const w = cv.clientWidth, h = cv.clientHeight, k = Math.min(w / ed.W, h / ed.Hs) * 0.94;
+  ed.view = { k, x: (w - ed.W * k) / 2, y: (h - ed.Hs * k) / 2 };
+}
+new ResizeObserver(() => { if (ed.img) resize(); }).observe(cv);
+const toPic = (mx, my) => [(mx - ed.view.x) / ed.view.k, (my - ed.view.y) / ed.view.k];
+const toScreen = (x, y) => [ed.view.x + x * ed.view.k, ed.view.y + y * ed.view.k];
+
+let lastNow = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 0;
+  lastNow = now;
+  if (ed.play) {
+    ed.t += dt * ed.speed;
+    if (ed.wander) { ed.cursor.x = 0.85 * Math.sin(ed.t * 0.37); ed.cursor.y = 0.6 * Math.sin(ed.t * 0.23 + 1); pad(); }
+    const k = 1 - Math.exp(-dt * ed.speed / LAG);
+    ed.cam.x += (ed.cursor.x - ed.cam.x) * k;
+    ed.cam.y += (ed.cursor.y - ed.cam.y) * k;
+    const p = Portrait.pose(ed.t, { x: -ed.cam.x * DRIFT, y: -ed.cam.y * DRIFT * 0.7 });
+    ed.motion.update(ed.t, ed.effects, { x: p.x / ed.fit, y: p.y / ed.fit }, ed.cam);
+  }
+  flush();
+  draw();
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1, v = ed.view, e = ed.sel;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = BG;
+  g.fillRect(0, 0, cv.width, cv.height);
+  // The picture, moving (but still while a stroke is painted, so the brush lands where
+  // it's seen), with the chosen effect's mask over it, moving along with it: a blink's eye
+  // and, over that, its lid, the one being painted the stronger.
+  let overlay = null;
+  if (ed.mask && e) {
+    overlay = [{ map: e.mask[0], channel: e.mask[1], color: KINDS[e.kind].color, alpha: e.lidPaint && ed.part === 'lid' ? 0.3 : 0.6 }];
+    if (e.lidPaint) overlay.push({ map: e.lid[0], channel: e.lid[1], color: KINDS[e.kind].lid, alpha: ed.part === 'lid' ? 0.75 : 0.45 });
+  }
+  const pic = ed.renderer.draw(ed.motion.values(ed.t, ed.effects), { still: !!ed.stroke, overlay });
+  g.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y);
+  g.imageSmoothingEnabled = v.k < 3;
+  g.fillStyle = '#16120f';
+  g.fillRect(0, 0, ed.W, ed.Hs);
+  if (pic) g.drawImage(pic, 0, 0, ed.W, ed.Hs);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.lineWidth = 1;
+  g.strokeStyle = 'rgba(255,255,255,0.08)';
+  g.strokeRect(v.x - 0.5, v.y - 0.5, ed.W * v.k + 1, ed.Hs * v.k + 1);
+  if (e && e.kind === 'swing') pivot(e);
+  if (e && e.kind === 'blink') skin(e);
+  if (e && (e.kind === 'wave' || e.kind === 'breathe' || e.kind === 'blink')) arrow(e);
+  // The brush.
+  if (ed.mouse && e && !ed.pan && !ed.drag && !nearHandle(ed.mouse)) {
+    const [mx, my] = ed.mouse, r = ed.brush.size / 2 * v.k;
+    g.strokeStyle = 'rgba(0,0,0,0.6)';
+    g.lineWidth = 3;
+    g.beginPath(); g.arc(mx, my, r, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = ed.brush.mode === 'erase' ? '#9fd0ff' : ed.brush.mode === 'smooth' ? '#c8f0a0' : '#fff';
+    g.lineWidth = 1.2;
+    g.beginPath(); g.arc(mx, my, r, 0, Math.PI * 2); g.stroke();
+    if (ed.brush.soft > 0.02 && r * (1 - ed.brush.soft) > 2) {
+      g.setLineDash([3, 4]);
+      g.beginPath(); g.arc(mx, my, r * (1 - ed.brush.soft), 0, Math.PI * 2); g.stroke();
+      g.setLineDash([]);
+    }
+  }
+}
+
+// Where a mask is strongest on average (picture px), for its arrow and its swing's reach.
+function centre(e) {
+  if (e.centre) return e.centre;
+  let sx = 0, sy = 0, s = 0;
+  for (let j = 0; j < ed.sh; j += 2) {
+    for (let i = 0; i < ed.mw; i += 2) { const v = e.data[j * ed.mw + i]; sx += v * i; sy += v * j; s += v; }
+  }
+  e.centre = s > 0 ? [sx / s / ed.mw * ed.W, sy / s / ed.sh * ed.H * ed.crop] : [ed.W / 2, ed.Hs / 2];
+  return e.centre;
+}
+function pivot(e) {
+  const [px, py] = toScreen(e.pivot[0], e.pivot[1]), [cx, cy] = centre(e);
+  // Its reach: from the pivot toward what it swings, as long as its Length.
+  const a = Math.atan2(cy - e.pivot[1], cx - e.pivot[0]), L = e.length * ed.view.k;
+  const tx = px + Math.cos(a) * L, ty = py + Math.sin(a) * L;
+  for (const [w, c] of [[3, 'rgba(0,0,0,0.55)'], [1.2, 'rgba(255,255,255,0.85)']]) {
+    g.strokeStyle = c;
+    g.lineWidth = w;
+    g.setLineDash([6, 5]);
+    g.beginPath(); g.moveTo(px, py); g.lineTo(tx, ty); g.stroke();
+    g.setLineDash([]);
+    g.beginPath(); g.arc(tx, ty, 4, 0, Math.PI * 2); g.stroke();
+  }
+  g.fillStyle = 'rgba(0,0,0,0.5)';
+  g.beginPath(); g.arc(px, py, 9, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#82de64';
+  g.lineWidth = 2;
+  g.beginPath(); g.arc(px, py, 9, 0, Math.PI * 2); g.moveTo(px - 13, py); g.lineTo(px + 13, py); g.moveTo(px, py - 13); g.lineTo(px, py + 13); g.stroke();
+  g.lineWidth = 1;
+}
+// A blink's skin spot: where the shut lid takes its colour from, shown in that colour.
+function skin(e) {
+  const [x, y] = toScreen(e.skin[0], e.skin[1]);
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = `rgb(${KINDS.blink.color})`;
+  g.lineWidth = 2;
+  g.beginPath(); g.arc(x, y, 8, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.moveTo(x - 14, y); g.lineTo(x - 9, y); g.moveTo(x + 9, y); g.lineTo(x + 14, y);
+  g.moveTo(x, y - 14); g.lineTo(x, y - 9); g.moveTo(x, y + 9); g.lineTo(x, y + 14); g.stroke();
+  g.lineWidth = 1;
+}
+function arrow(e) {
+  const [cx, cy] = toScreen(...centre(e)), a = e.dir * Math.PI / 180, L = 46;
+  const x1 = cx + Math.cos(a) * L, y1 = cy + Math.sin(a) * L;
+  for (const [w, c] of [[4, 'rgba(0,0,0,0.6)'], [2, `rgb(${KINDS[e.kind].color})`]]) {
+    g.strokeStyle = c;
+    g.lineWidth = w;
+    g.beginPath();
+    g.moveTo(cx - Math.cos(a) * L, cy - Math.sin(a) * L); g.lineTo(x1, y1);
+    g.moveTo(x1 - Math.cos(a - 0.5) * 12, y1 - Math.sin(a - 0.5) * 12); g.lineTo(x1, y1);
+    g.lineTo(x1 - Math.cos(a + 0.5) * 12, y1 - Math.sin(a + 0.5) * 12);
+    g.stroke();
+  }
+  g.lineWidth = 1;
+}
+// Whether the pointer is on the chosen effect's pivot or skin spot, to drag it.
+function nearHandle(m) {
+  const e = ed.sel, k = handle(e);
+  if (!m || !k) return false;
+  const [px, py] = toScreen(e[k][0], e[k][1]);
+  return Math.hypot(m[0] - px, m[1] - py) < 14;
+}
+
+// ---------- Painting ----------
+const sm = u => u * u * (3 - 2 * u);
+// The mask's texels for picture px.
+const tex = (x, y) => [x * ed.mw / ed.W, y * ed.sh / (ed.H * ed.crop)];
+
+function strokeStart(x, y) {
+  const e = layer();
+  ed.stroke = { e, base: e.data.slice(), cov: new Float32Array(e.data.length), box: null, last: [x, y] };
+  dab(x, y);
+}
+function strokeTo(x, y) {
+  const s = ed.stroke, [lx, ly] = s.last, d = Math.hypot(x - lx, y - ly);
+  const step = Math.max(1, ed.brush.size * 0.12), n = Math.floor(d / step);
+  for (let i = 1; i <= n; i++) dab(lx + (x - lx) * i * step / d, ly + (y - ly) * i * step / d);
+  if (n) s.last = [lx + (x - lx) * n * step / d, ly + (y - ly) * n * step / d];
+}
+function strokeEnd() {
+  const s = ed.stroke;
+  ed.stroke = null;
+  if (!s || !s.box) return;
+  const [x0, y0, x1, y1] = s.box;
+  record({ type: 'mask', e: s.e, x: x0, y: y0, w: x1 - x0, h: y1 - y0, before: patch(s.base, x0, y0, x1, y1), after: patch(s.e.data, x0, y0, x1, y1) });
+}
+// One dab of the brush at picture px (x, y). Painting and erasing move each texel toward
+// the brush's strength (or nothing) as far as this stroke has covered it, however many
+// dabs overlap; smoothing blurs what's under the brush a little more with each dab.
+function dab(x, y) {
+  const s = ed.stroke, e = s.e, b = ed.brush, mw = ed.mw;
+  const [cx, cy] = tex(x, y), r = Math.max(0.75, b.size / 2 * ed.mw / ed.W), inner = r * (1 - b.soft);
+  const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(mw, Math.ceil(cx + r));
+  const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(ed.sh, Math.ceil(cy + r));
+  if (x0 >= x1 || y0 >= y1) return;
+  const fall = (i, j) => {
+    const d = Math.hypot(i + 0.5 - cx, j + 0.5 - cy);
+    return d >= r ? 0 : d <= inner ? 1 : 1 - sm((d - inner) / (r - inner));
+  };
+  if (b.mode === 'smooth') {
+    const rad = Math.max(1, Math.round(r * 0.18));
+    const soft = blurred(e.data, x0, y0, x1, y1, rad);
+    for (let j = y0; j < y1; j++) {
+      for (let i = x0; i < x1; i++) {
+        const f = fall(i, j) * b.opacity * 0.5, o = j * mw + i;
+        if (f > 0) e.data[o] += (soft[(j - y0) * (x1 - x0) + i - x0] - e.data[o]) * f;
+      }
+    }
+  } else {
+    const target = b.mode === 'erase' ? 0 : b.strength;
+    for (let j = y0; j < y1; j++) {
+      for (let i = x0; i < x1; i++) {
+        const f = fall(i, j), o = j * mw + i;
+        if (f > s.cov[o]) { s.cov[o] = f; e.data[o] = s.base[o] + (target - s.base[o]) * f * b.opacity; }
+      }
+    }
+  }
+  s.box = s.box ? [Math.min(s.box[0], x0), Math.min(s.box[1], y0), Math.max(s.box[2], x1), Math.max(s.box[3], y1)] : [x0, y0, x1, y1];
+  write(e, x0, y0, x1 - x0, y1 - y0);
+  dirty();
+}
+
+// A box blur (twice over, so near enough a gaussian) of part of a mask, `rad` texels wide.
+function blurred(data, x0, y0, x1, y1, rad) {
+  const mw = ed.mw, sh = ed.sh, w = x1 - x0, h = y1 - y0;
+  const X0 = Math.max(0, x0 - 2 * rad), X1 = Math.min(mw, x1 + 2 * rad), Y0 = Math.max(0, y0 - 2 * rad), Y1 = Math.min(sh, y1 + 2 * rad);
+  const W = X1 - X0, H = Y1 - Y0;
+  let a = new Float32Array(W * H);
+  for (let j = 0; j < H; j++) a.set(data.subarray((Y0 + j) * mw + X0, (Y0 + j) * mw + X1), j * W);
+  for (let pass = 0; pass < 2; pass++) {
+    a = box(a, W, H, rad, true);
+    a = box(a, W, H, rad, false);
+  }
+  const out = new Float32Array(w * h);
+  for (let j = 0; j < h; j++) out.set(a.subarray((y0 - Y0 + j) * W + x0 - X0, (y0 - Y0 + j) * W + x0 - X0 + w), j * w);
+  return out;
+}
+// One pass of it, along the rows or down the columns.
+function box(a, W, H, r, rows) {
+  const out = new Float32Array(W * H), n = rows ? W : H, m = rows ? H : W;
+  for (let k = 0; k < m; k++) {
+    const at = i => (rows ? k * W + i : i * W + k);
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < Math.min(r, n); i++) { sum += a[at(i)]; cnt++; }
+    for (let i = 0; i < n; i++) {
+      if (i + r < n) { sum += a[at(i + r)]; cnt++; }
+      if (i - r - 1 >= 0) { sum -= a[at(i - r - 1)]; cnt--; }
+      out[at(i)] = sum / cnt;
+    }
+  }
+  return out;
+}
+const patch = (data, x0, y0, x1, y1) => {
+  const w = x1 - x0, out = new Float32Array(w * (y1 - y0));
+  for (let j = y0; j < y1; j++) out.set(data.subarray(j * ed.mw + x0, j * ed.mw + x1), (j - y0) * w);
+  return out;
+};
+function put(e, x, y, w, h, src) {
+  for (let j = 0; j < h; j++) e.data.set(src.subarray(j * w, (j + 1) * w), (y + j) * ed.mw + x);
+  e.centre = null;
+  write(e, x, y, w, h);
+}
+// The whole mask at once: fill, clear, invert or smooth.
+function whole(fn, what) {
+  const e = layer();
+  if (!e) return;
+  const before = e.data.slice();
+  fn(e.data);
+  put(e, 0, 0, ed.mw, ed.sh, e.data.slice());
+  record({ type: 'mask', e, x: 0, y: 0, w: ed.mw, h: ed.sh, before, after: e.data.slice() });
+  dirty();
+  say(`${what} ${layerName(e)}`);
+}
+$('#fill').onclick = () => whole(d => d.fill(ed.brush.strength), 'Filled');
+$('#clear').onclick = () => whole(d => d.fill(0), 'Cleared');
+$('#invert').onclick = () => whole(d => { for (let i = 0; i < d.length; i++) d[i] = 1 - d[i]; }, 'Inverted');
+$('#blur').onclick = () => whole(d => d.set(blurred(d, 0, 0, ed.mw, ed.sh, 3)), 'Smoothed');
+
+// ---------- Undo ----------
+function record(entry) {
+  ed.undo.push(entry);
+  if (ed.undo.length > 100) ed.undo.shift();
+  ed.redo = [];
+  history();
+}
+function history() {
+  $('#undo').disabled = !ed.undo.length;
+  $('#redo').disabled = !ed.redo.length;
+}
+function apply(entry, back) {
+  if (entry.type === 'mask') {
+    put(entry.e, entry.x, entry.y, entry.w, entry.h, back ? entry.before : entry.after);
+    const e = owner(entry.e);
+    if (e && e.lidPaint) ed.part = e.lidPaint === entry.e ? 'lid' : 'eye';
+    select(e);
+  } else if (entry.type === 'param') {
+    entry.e[entry.key] = structuredClone(back ? entry.before : entry.after);
+    select(entry.e);
+  } else if (entry.type === 'list') {
+    const s = back ? entry.before : entry.after;
+    ed.effects = s.effects.slice();
+    rebuild();
+    select(s.sel);
+  }
+  dirty();
+}
+function undo() { const e = ed.undo.pop(); if (e) { apply(e, true); ed.redo.push(e); history(); } }
+function redo() { const e = ed.redo.pop(); if (e) { apply(e, false); ed.undo.push(e); history(); } }
+$('#undo').onclick = undo;
+$('#redo').onclick = redo;
+// A change to the list of effects, undoably.
+function relist(effects, sel) {
+  const before = { effects: ed.effects.slice(), sel: ed.sel };
+  ed.effects = effects;
+  rebuild();
+  select(sel);
+  record({ type: 'list', before, after: { effects: effects.slice(), sel } });
+  dirty();
+}
+
+// ---------- Pointer: paint, drag a pivot, pan and zoom ----------
+const at = ev => { const r = cv.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+cv.addEventListener('contextmenu', ev => ev.preventDefault());
+cv.addEventListener('pointerdown', ev => {
+  if (!ed.img) return;
+  const m = at(ev);
+  ed.mouse = m;
+  cv.setPointerCapture(ev.pointerId);
+  if (ev.button === 1 || ev.button === 2) { ed.pan = { m, x: ed.view.x, y: ed.view.y }; return cursor(); }
+  if (ev.button !== 0 || !ed.sel) return;
+  const [x, y] = toPic(...m);
+  if (nearHandle(m)) { const k = handle(ed.sel); ed.drag = { e: ed.sel, key: k, before: ed.sel[k].slice() }; return cursor(); }
+  if (ev.altKey) return pick(x, y);
+  strokeStart(x, y);
+});
+cv.addEventListener('pointermove', ev => {
+  const m = at(ev);
+  ed.mouse = m;
+  if (ed.pan) { ed.view.x = ed.pan.x + m[0] - ed.pan.m[0]; ed.view.y = ed.pan.y + m[1] - ed.pan.m[1]; return; }
+  const [x, y] = toPic(...m);
+  if (ed.drag) {
+    const pv = ed.drag.e[ed.drag.key] = [Math.round(clamp(x, 0, ed.W)), Math.round(clamp(y, 0, ed.Hs))];
+    if ($('#pivot')) $('#pivot').value = `${pv[0]}, ${pv[1]} px`;
+    dirty();
+    return;
+  }
+  if (ed.stroke) strokeTo(x, y);
+  readout(x, y);
+  cursor();
+});
+const up = () => {
+  if (ed.drag) {
+    const d = ed.drag;
+    ed.drag = null;
+    if (d.before.join() !== d.e[d.key].join()) record({ type: 'param', e: d.e, key: d.key, before: d.before, after: d.e[d.key].slice() });
+  }
+  ed.pan = null;
+  strokeEnd();
+  cursor();
+};
+cv.addEventListener('pointerup', up);
+cv.addEventListener('pointercancel', up);
+cv.addEventListener('pointerleave', () => { if (!ed.stroke && !ed.pan && !ed.drag) { ed.mouse = null; $('#readout').textContent = ''; } });
+cv.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const [mx, my] = at(ev), v = ed.view;
+  const k = clamp(v.k * Math.exp(-ev.deltaY * (ev.deltaMode ? 0.05 : 0.0015)), 0.1, 20);
+  v.x = mx - (mx - v.x) * k / v.k;
+  v.y = my - (my - v.y) * k / v.k;
+  v.k = k;
+}, { passive: false });
+function cursor() {
+  cv.className = ed.pan ? 'pan' : ed.drag || nearHandle(ed.mouse) ? 'pivot' : ed.sel ? 'paint' : '';
+}
+function readout(x, y) {
+  const e = layer(), inside = x >= 0 && y >= 0 && x < ed.W && y < ed.Hs;
+  if (!inside) { $('#readout').textContent = ''; return; }
+  let text = `${Math.round(x)}, ${Math.round(y)} px`;
+  if (e) {
+    const [i, j] = tex(x, y);
+    text = `${layerName(e)} ${Math.round(e.data[Math.min(ed.sh - 1, j | 0) * ed.mw + Math.min(ed.mw - 1, i | 0)] * 100)}% · ${text}`;
+  }
+  $('#readout').textContent = text;
+}
+// Alt+click: the brush takes the strength painted here.
+function pick(x, y) {
+  const [i, j] = tex(x, y);
+  if (i < 0 || j < 0 || i >= ed.mw || j >= ed.sh) return;
+  ed.brush.strength = Math.round(layer().data[(j | 0) * ed.mw + (i | 0)] * 100) / 100;
+  brush();
+  say(`Strength ${Math.round(ed.brush.strength * 100)}%`);
+}
+
+// ---------- The effects ----------
+function list() {
+  const box = $('#effects');
+  box.textContent = '';
+  for (const e of ed.effects) {
+    const K = KINDS[e.kind], row = document.createElement('div');
+    row.className = 'fx' + (e.on ? '' : ' off');
+    row.setAttribute('aria-selected', String(e === ed.sel));
+    row.title = K.tip;
+    row.innerHTML = `<button class="eye" title="Switch it on or off">${e.on ? '●' : '○'}</button><span class="dot"></span><span class="name"></span><span class="kind">${K.label}</span>`;
+    row.querySelector('.dot').style.background = `rgb(${K.color})`;
+    row.querySelector('.name').textContent = e.name;
+    row.querySelector('.eye').onclick = ev => { ev.stopPropagation(); toggle(e); };
+    row.onclick = () => select(e);
+    box.appendChild(row);
+  }
+  for (const b of document.querySelectorAll('[data-add]')) {
+    b.disabled = slotsUsed() + Rig.slots(b.dataset.add) > Rig.MAX || (b.dataset.add === 'hold' && ed.effects.some(e => e.kind === 'hold'));
+  }
+}
+function toggle(e) {
+  record({ type: 'param', e, key: 'on', before: e.on, after: !e.on });
+  e.on = !e.on;
+  dirty();
+  list();
+  props();
+}
+function select(e) {
+  ed.sel = e && ed.effects.includes(e) ? e : null;
+  list();
+  props();
+  cursor();
+  if (ed.mouse) readout(...toPic(...ed.mouse));
+}
+for (const b of document.querySelectorAll('[data-add]')) {
+  b.onclick = () => {
+    const e = Rig.make(b.dataset.add);
+    e.id = ed.ids++;
+    e.data = new Float32Array(ed.mw * ed.sh);
+    if (e.kind === 'blink') e.lidPaint = { data: new Float32Array(ed.mw * ed.sh), mask: null, centre: null };
+    const same = ed.effects.filter(o => o.kind === e.kind).length;
+    if (same) e.name += ` ${same + 1}`;
+    const k = handle(e);
+    if (k) e[k] = [Math.round(ed.W / 2), Math.round(ed.Hs * 0.3)];
+    if (e.kind === 'blink') ed.part = 'eye';
+    relist([...ed.effects, e], e);
+    say(e.kind === 'blink' ? `Added ${e.name}: paint each eye, then its lid (L), and drag the skin spot onto bare skin`
+      : `Added ${e.name}: paint where it moves${k ? ', and drag its pivot to where it turns from' : ''}`);
+  };
+}
+
+// The chosen effect's settings.
+function props() {
+  const box = $('#props'), e = ed.sel;
+  box.textContent = '';
+  if (!e) {
+    box.innerHTML = '<h2>Effect</h2><p>Choose an effect on the left to paint it and set it up, or add one.</p>';
+    return;
+  }
+  const K = KINDS[e.kind];
+  box.innerHTML = `<h2>Effect</h2><h3></h3><p></p>
+    <div class="field"><span class="note">Name</span><input type="text" id="name" maxlength="40"></div>
+    <label class="check"><input type="checkbox" id="on"> On</label>
+    <label class="check" id="holdrow" title="Where Hold still is painted, this effect moves nothing"><input type="checkbox" id="hold"> Held areas stay still</label>
+    <div class="row" id="partrow" hidden><span class="note">Paint</span>
+      <div class="seg" id="part"><button data-v="eye" title="All of each eye, from the top of its upper lash to its lower lid: where the lid comes down over (L)">Eye</button><button data-v="lid" title="The upper lid inside it: its dark lash, a px or so beyond, which comes down until its lower edge reaches the bottom of the eye (L)">Lid</button></div></div>
+    <div id="params"></div>
+    <div class="row" id="pivotrow" hidden><span class="note" id="pivotname">Pivot</span><output id="pivot"></output><span class="note" id="pivotnote">drag it on the picture</span></div>
+    <div class="row"><button id="dup">Duplicate</button><button id="del">Delete</button></div>`;
+  box.querySelector('h3').innerHTML = `<span></span><small>${K.label}</small>`;
+  box.querySelector('h3 span').textContent = e.name;
+  box.querySelector('p').textContent = K.tip + '.';
+  const name = $('#name');
+  name.value = e.name;
+  name.onchange = () => {
+    const v = name.value.trim() || K.label;
+    if (v !== e.name) { record({ type: 'param', e, key: 'name', before: e.name, after: v }); e.name = v; dirty(); list(); props(); }
+  };
+  $('#on').checked = e.on;
+  $('#on').onchange = () => toggle(e);
+  $('#holdrow').hidden = !('hold' in e); // the hold itself, and blinks, which pay it no heed
+  if ('hold' in e) {
+    $('#hold').checked = e.hold;
+    $('#hold').onchange = () => { record({ type: 'param', e, key: 'hold', before: e.hold, after: !e.hold }); e.hold = !e.hold; dirty(); };
+  }
+  if (e.lidPaint) {
+    $('#partrow').hidden = false;
+    for (const b of $('#part').children) b.setAttribute('aria-pressed', String(b.dataset.v === ed.part));
+    $('#part').onclick = ev => { const b = ev.target.closest('button'); if (b) part(b.dataset.v); };
+  }
+  const params = $('#params');
+  for (const [k, p] of Object.entries(K.params)) params.appendChild(slider(p, () => e[k], v => { e[k] = v; dirty(); }, (a, b) => record({ type: 'param', e, key: k, before: a, after: b })));
+  const hk = handle(e);
+  if (hk) {
+    $('#pivotrow').hidden = false;
+    $('#pivot').value = `${e[hk][0]}, ${e[hk][1]} px`;
+    if (hk === 'skin') {
+      $('#pivotname').textContent = 'Skin';
+      $('#pivotnote').textContent = 'drag the spot onto bare skin: the shut lid takes its colour';
+    }
+  }
+  $('#dup').disabled = slotsUsed() + Rig.slots(e.kind) > Rig.MAX || e.kind === 'hold';
+  $('#dup').onclick = () => {
+    const c = { ...structuredClone({ ...e, data: null, centre: null }), id: ed.ids++, data: e.data.slice(), name: e.name + ' copy' };
+    const i = ed.effects.indexOf(e);
+    relist([...ed.effects.slice(0, i + 1), c, ...ed.effects.slice(i + 1)], c);
+  };
+  $('#del').onclick = () => {
+    const i = ed.effects.indexOf(e), rest = ed.effects.filter(o => o !== e);
+    relist(rest, rest[Math.min(i, rest.length - 1)] || null);
+    say(`Deleted ${e.name} (Ctrl+Z brings it back)`);
+  };
+}
+
+// Which of a blink's masks the brush paints: its eye or its lid.
+function part(v = ed.part === 'eye' ? 'lid' : 'eye') {
+  ed.part = v;
+  props();
+  if (ed.mouse) readout(...toPic(...ed.mouse));
+  if (ed.sel && ed.sel.lidPaint) say(`Painting ${layerName(layer())}`);
+}
+
+// A setting's slider and box. `commit(before, after)` once a change is done.
+function slider(p, get, set, commit) {
+  const row = document.createElement('div');
+  row.className = 'param';
+  row.innerHTML = `<label></label><input type="range"><span class="num"><input type="number"><span class="unit"></span></span>`;
+  const label = row.querySelector('label'), range = row.querySelector('[type=range]'), num = row.querySelector('[type=number]');
+  label.textContent = p.label;
+  label.title = p.tip;
+  for (const el of [range, num]) { el.min = p.min; el.max = p.max; el.step = p.step; el.setAttribute('aria-label', p.label); }
+  const unit = row.querySelector('.unit');
+  const show = () => {
+    const v = get();
+    range.value = v;
+    if (document.activeElement !== num) num.value = +v.toFixed(4);
+    unit.innerHTML = p.unit === '°' ? `<span class="arrow" style="transform: rotate(${v}deg)">→</span>` : p.unit || '';
+  };
+  let before = null;
+  const begin = () => { if (before === null) before = get(); };
+  const change = v => { if (!Number.isFinite(v)) return; begin(); set(clamp(v, p.min, p.max)); show(); };
+  const end = () => { if (before !== null && before !== get()) commit(before, get()); before = null; };
+  range.addEventListener('pointerdown', begin);
+  range.addEventListener('keydown', begin);
+  num.addEventListener('focus', begin);
+  range.addEventListener('input', () => change(Number(range.value)));
+  num.addEventListener('input', () => { if (num.value !== '') change(Number(num.value)); });
+  range.addEventListener('change', end);
+  num.addEventListener('change', () => { show(); end(); });
+  num.addEventListener('blur', () => { show(); end(); });
+  show();
+  return row;
+}
+
+// ---------- The brush ----------
+// The brush's settings; all but its size are shown in percent.
+const BRUSH = {
+  size: { min: 2, max: 600, step: 1, label: 'Size', unit: 'px', tip: 'Across, in the picture\'s px ( [ and ] )' },
+  strength: { min: 0, max: 100, step: 1, label: 'Strength', unit: '%', tip: 'How strongly it paints the effect on: 100% is the effect at its full settings (keys 1 to 0)' },
+  soft: { min: 0, max: 100, step: 1, label: 'Softness', unit: '%', tip: 'How soft its edge is (Shift+[ and ]): soft edges let the picture around a moving part stretch smoothly' },
+  opacity: { min: 2, max: 100, step: 1, label: 'Opacity', unit: '%', tip: 'How far one stroke goes toward the strength: lower builds up over several strokes' },
+};
+function brush() {
+  const box = $('#brush');
+  box.textContent = '';
+  for (const [k, p] of Object.entries(BRUSH)) {
+    const s = k === 'size' ? 1 : 100;
+    box.appendChild(slider(p, () => Math.round(ed.brush[k] * s * 100) / 100, v => { ed.brush[k] = v / s; }, () => {}));
+  }
+  for (const b of $('#mode').children) b.setAttribute('aria-pressed', String(b.dataset.v === ed.brush.mode));
+}
+function mode(m) { ed.brush.mode = m; brush(); }
+$('#mode').onclick = ev => { const b = ev.target.closest('button'); if (b) mode(b.dataset.v); };
+
+// ---------- Preview ----------
+function play(on = !ed.play) { ed.play = on; $('#play').textContent = on ? 'Pause' : 'Play'; }
+$('#play').onclick = () => play();
+$('#showmask').onchange = ev => { ed.mask = ev.target.checked; };
+$('#look').onchange = ev => { ed.look = ev.target.value; ed.renderer.picture(picture(), fitting()); };
+function speed(v) {
+  ed.speed = v;
+  for (const b of $('#speed').children) b.setAttribute('aria-pressed', String(Number(b.dataset.v) === v));
+}
+$('#speed').onclick = ev => { const b = ev.target.closest('button'); if (b) speed(Number(b.dataset.v)); };
+function pad() {
+  $('#dot').style.left = `${(ed.cursor.x + 1) * 50}%`;
+  $('#dot').style.top = `${(ed.cursor.y + 1) * 50}%`;
+}
+const padAt = ev => {
+  const r = $('#pad').getBoundingClientRect();
+  ed.cursor.x = clamp((ev.clientX - r.left) / r.width * 2 - 1, -1, 1);
+  ed.cursor.y = clamp((ev.clientY - r.top) / r.height * 2 - 1, -1, 1);
+  wander(false);
+  pad();
+};
+$('#pad').addEventListener('pointerdown', ev => { $('#pad').setPointerCapture(ev.pointerId); padAt(ev); });
+$('#pad').addEventListener('pointermove', ev => { if (ev.buttons & 1) padAt(ev); });
+$('#pad').addEventListener('dblclick', () => { ed.cursor = { x: 0, y: 0 }; wander(false); pad(); });
+function wander(on = !ed.wander) { ed.wander = on; $('#wander').checked = on; }
+$('#wander').onchange = ev => wander(ev.target.checked);
+$('#flick').onclick = () => { wander(false); ed.cursor = { x: ed.cursor.x > 0 ? -1 : 1, y: 0 }; pad(); };
+$('#gust').onclick = () => { ed.motion.blow(ed.t); say('A gust'); };
+$('#blink').onclick = () => { ed.motion.blink(ed.t); say('A blink'); };
+
+// ---------- Saving ----------
+const base64 = blob => new Promise(resolve => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result.slice(r.result.indexOf(',') + 1));
+  r.readAsDataURL(blob);
+});
+const round = v => +Number(v).toFixed(4);
+
+// The rig's files: its script and its masks, three to a PNG, at full height (the rows
+// that aren't shown left empty). `{ name: text or a PNG blob }`.
+async function files() {
+  const name = ed.rigUrl.split('/').pop().replace(/\.js$/, ''), out = {}, maps = [];
+  const layers = ed.effects.flatMap(layersOf);
+  for (let m = 0; m < Math.ceil(layers.length / 3); m++) {
+    const c = Kit.canvas(ed.mw, ed.mh), cg = c.getContext('2d'), im = cg.createImageData(ed.mw, ed.mh);
+    for (let i = 3; i < im.data.length; i += 4) im.data[i] = 255;
+    for (const l of layers) {
+      if (l.mask[0] !== m) continue;
+      for (let o = 0, ch = l.mask[1]; o < l.data.length; o++) im.data[o * 4 + ch] = Math.round(l.data[o] * 255);
+    }
+    cg.putImageData(im, 0, 0);
+    maps.push(`${name}-${m}.png`);
+    out[maps[m]] = await new Promise(resolve => c.toBlob(resolve, 'image/png'));
+  }
+  const effects = ed.effects.map(e => {
+    const d = { kind: e.kind, name: e.name };
+    if (!e.on) d.on = false;
+    if ('hold' in e) d.hold = e.hold;
+    d.mask = e.mask.slice();
+    if (e.lidPaint) d.lid = e.lid.slice();
+    for (const k of Object.keys(KINDS[e.kind].params)) d[k] = round(e[k]);
+    const k = handle(e);
+    if (k) d[k] = e[k].map(Math.round);
+    return d;
+  });
+  out[`${name}.js`] = `// The rig that brings img/${ed.src.src.split('/').pop()} to life (see js/rig.js). Edit it in tools/rig.html.\n` +
+    `Rig.add({\n  "size": ${JSON.stringify([ed.W, ed.H])},\n  "maps": ${JSON.stringify(maps)},\n  "effects": [\n` +
+    effects.map(d => '    ' + JSON.stringify(d)).join(',\n') + '\n  ]\n});\n';
+  return out;
+}
+
+async function save() {
+  if (!ed.img) return;
+  say('Saving…');
+  try {
+    const f = await files(), body = {};
+    for (const [k, v] of Object.entries(f)) body[k] = typeof v === 'string' ? v : await base64(v);
+    const r = await fetch('/rig', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rig: ed.rigUrl.replace(/^(\.\.\/)+/, ''), files: body }) });
+    const res = await r.json().catch(() => ({ ok: false, error: `the server answered ${r.status}` }));
+    if (!res.ok) throw new Error(res.error);
+    ed.dirty = false;
+    $('#save').textContent = 'Save';
+    say(`Saved ${res.wrote.join(', ')} in wallpaper/img/`);
+  } catch (e) {
+    say(`Couldn't save (${e.message}). Serve the repo with node tools/serve.js, or Download and put the files in wallpaper/img/`, true);
+  }
+}
+$('#save').onclick = save;
+
+// The same files in a zip (stored, not compressed), for putting in place by hand.
+async function download() {
+  const f = await files(), enc = new TextEncoder(), parts = [], dir = [];
+  let offset = 0, count = 0;
+  for (const [name, v] of Object.entries(f)) {
+    const data = typeof v === 'string' ? enc.encode(v) : new Uint8Array(await v.arrayBuffer()), n = enc.encode(name), crc = crc32(data);
+    const head = (sig, size) => { const h = new DataView(new ArrayBuffer(size)); h.setUint32(0, sig, true); return h; };
+    const l = head(0x04034b50, 30);
+    l.setUint16(4, 20, true); l.setUint32(14, crc, true); l.setUint32(18, data.length, true); l.setUint32(22, data.length, true); l.setUint16(26, n.length, true);
+    const c = head(0x02014b50, 46);
+    c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+    c.setUint16(28, n.length, true); c.setUint32(42, offset, true);
+    parts.push(l, n, data);
+    dir.push(c, n);
+    offset += 30 + n.length + data.length;
+    count++;
+  }
+  const size = dir.reduce((s, p) => s + p.byteLength, 0), end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, count, true); end.setUint16(10, count, true); end.setUint32(12, size, true); end.setUint32(16, offset, true);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([...parts, ...dir, end], { type: 'application/zip' }));
+  a.download = ed.rigUrl.split('/').pop().replace(/\.js$/, '.zip');
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function crc32(data) { let c = 0xffffffff; for (const b of data) c = CRC[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+$('#download').onclick = download;
+$('#revert').onclick = () => { if (!ed.dirty || confirm('Throw away everything since the last save?')) { ed.dirty = false; location.reload(); } };
+window.addEventListener('beforeunload', ev => { if (ed.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
+
+// ---------- Keys ----------
+window.addEventListener('keydown', ev => {
+  if (ev.target.closest && ev.target.closest('input[type=text], input[type=number], select, textarea')) return;
+  const k = ev.key.toLowerCase(), mod = ev.ctrlKey || ev.metaKey;
+  if (mod && k === 's') { ev.preventDefault(); return save(); }
+  if (mod && (k === 'y' || (k === 'z' && ev.shiftKey))) { ev.preventDefault(); return redo(); }
+  if (mod && k === 'z') { ev.preventDefault(); return undo(); }
+  if (mod || ev.altKey) return;
+  const b = ed.brush;
+  if (k === 'b') mode('paint');
+  else if (k === 'e') mode('erase');
+  else if (k === 's') mode('smooth');
+  else if (k === '[' || k === '{') { if (ev.shiftKey) b.soft = clamp(b.soft - 0.1, 0, 1); else b.size = clamp(Math.round(b.size / 1.2), 2, 600); brush(); }
+  else if (k === ']' || k === '}') { if (ev.shiftKey) b.soft = clamp(b.soft + 0.1, 0, 1); else b.size = clamp(Math.round(b.size * 1.2), 2, 600); brush(); }
+  else if (/^[0-9]$/.test(k)) { b.strength = k === '0' ? 1 : Number(k) / 10; brush(); say(`Strength ${Math.round(b.strength * 100)}%`); }
+  else if (k === 'm') { ed.mask = !ed.mask; $('#showmask').checked = ed.mask; }
+  else if (k === 'l' && ed.sel && ed.sel.lidPaint) part();
+  else if (k === ' ') play();
+  else if (k === 'f') fitView();
+  else if (k === 'g') $('#gust').click();
+  else if (k === 'k') $('#blink').click();
+  else if (k === 'w') wander();
+  else if (k === 'arrowup' || k === 'arrowdown') {
+    const i = ed.effects.indexOf(ed.sel) + (k === 'arrowup' ? -1 : 1);
+    if (ed.effects[i]) select(ed.effects[i]);
+  } else return;
+  ev.preventDefault();
+});
+
+brush();
+play(true);
+speed(1);
+pad();
+props();
+start();
+</script>
+</body>
+</html>

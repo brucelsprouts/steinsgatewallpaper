@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mockup 2 — Thirds</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas>
+<script src="sg.js"></script>
+<script>
+const ctx = SG.stage();
+const W = 2560, H = 1440;
+const mx = 853, my = 800;
+SG.background(ctx, { warmAt: [mx, my, 800] });
+
+// Machinery spills in from the right edge and dissolves before reaching the meter.
+const fade = g => {
+  const m = g.createLinearGradient(1250, 0, 2150, 0);
+  m.addColorStop(0, 'rgba(0,0,0,0)');
+  m.addColorStop(1, 'rgba(0,0,0,1)');
+  g.fillStyle = m; g.fillRect(0, 0, W, H);
+};
+SG.layer(ctx, g => {
+  SG.drawClock(g, { x: 1720, y: 250, r: 210, alpha: 0.10, time: 3 * 3600 + 22 * 60 });
+  SG.drawGear(g, { x: 1980, y: 1360, r: 150, teeth: 36, alpha: 0.10, spokes: 6, angle: 0.2 });
+}, { blur: 5, mask: fade });
+SG.layer(ctx, g => {
+  SG.drawClock(g, { x: 2520, y: 560, r: 620, alpha: 0.11, rot: 0.05, time: 4 * 3600 + 51 * 60 + 12 });
+}, { blur: 1.6, mask: fade });
+SG.layer(ctx, g => {
+  SG.drawGear(g, { x: 2190, y: 1150, r: 250, teeth: 54, alpha: 0.14, spokes: 5, angle: 0.03 });
+  SG.drawGear(g, { x: 2500, y: 950, r: 150, teeth: 32, alpha: 0.13, spokes: 4, angle: 0.11 });
+  SG.drawGear(g, { x: 2330, y: 760, r: 64, teeth: 16, alpha: 0.16, spokes: 3, angle: 0.3 });
+}, { blur: 0.5, mask: fade });
+
+SG.drawMeter(ctx, { cx: mx, cy: my, tubeH: 230, text: '1.048596' });
+SG.dust(ctx, { seed: 11, count: 200, near: [mx, my, 320] });
+SG.vignette(ctx, 0.9);
+SG.dither(ctx);
+</script></body></html>

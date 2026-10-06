@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- Records the wallpaper frame by frame (needs tools/serve.js). Query:
+     name=clip  fps=30  secs=10  width=1280  wp=<query for the wallpaper>
+     script=[[t,"shift"],[t,"click"],[t,"ink"],[t,"pointer",x,y],...]   Frames land in shots/frames/<name>/. -->
+<html><head><meta charset="utf-8"><title>recording</title></head>
+<body style="margin:0;background:#000;overflow:hidden">
+<iframe id="f" style="border:0;width:2560px;height:1440px"></iframe>
+<script>
+const q = new URLSearchParams(location.search);
+const name = q.get('name') || 'clip';
+const fps = Number(q.get('fps') || 30), secs = Number(q.get('secs') || 10), width = Number(q.get('width') || 1280);
+const script = JSON.parse(q.get('script') || '[]');
+const f = document.getElementById('f');
+f.src = '../wallpaper/index.html?manual=1&' + (q.get('wp') || '');
+f.onload = async () => {
+  const SG = f.contentWindow.SG, src = f.contentWindow.document.getElementById('c');
+  const out = document.createElement('canvas');
+  out.width = width; out.height = Math.round(src.height * width / src.width);
+  const g = out.getContext('2d');
+  for (let i = 0; i < fps * secs; i++) {
+    const t = i / fps;
+    SG.renderAt(t);
+    for (const ev of script) {
+      if (ev.done || t < ev[0]) continue;
+      ev.done = true;
+      if (ev[1] === 'shift') SG.shift();
+      if (ev[1] === 'click') SG.click();
+      if (ev[1] === 'ink') SG.ink();
+      if (ev[1] === 'pointer') SG.pointer(ev[2], ev[3]);
+    }
+    g.drawImage(src, 0, 0, out.width, out.height);
+    const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.93));
+    await fetch(`/frame/${name}/${String(i).padStart(4, '0')}.jpg`, { method: 'POST', body: blob });
+    document.title = `recording ${i + 1}/${fps * secs}`;
+  }
+  document.title = 'done';
+};
+</script>
+</body></html>

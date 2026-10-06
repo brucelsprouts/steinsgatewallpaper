@@ -1,0 +1,356 @@
+<!doctype html>
+<!-- Preview: the live wallpaper scaled to fit this window, with its settings and
+     buttons to make things happen now. Serve the repo (node tools/serve.js) and open
+     http://localhost:5173/ (from a file:// page the buttons can't reach the wallpaper).
+     Keys: S shift, C click, 1-3 ink, P pause, H hide the controls, F full screen. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Divergence Meter preview</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0908; --panel: #131010; --raised: #1c1816; --line: #2b2421; --hover: #4a3b32;
+    --text: #ddd2c7; --dim: #8b7f76; --glow: #ffa04d; --on: #3b2617;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg); color: var(--text); font: 13px/1.35 'Segoe UI', system-ui, sans-serif;
+  }
+  #stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--bg); }
+  #stage iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #040303; }
+  #hint {
+    position: absolute; right: 14px; bottom: 12px; padding: 4px 10px; border-radius: 6px;
+    background: rgba(19, 16, 16, 0.85); color: var(--dim); font-size: 12px;
+    opacity: 0; transition: opacity 0.5s; pointer-events: none;
+  }
+  #hint.show { opacity: 1; }
+  #note { padding: 8px 14px; background: #3b1d12; color: #ffd6bd; font-size: 12px; }
+  #panel {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px;
+    padding: 10px 14px 8px; background: var(--panel); border-top: 1px solid var(--line);
+  }
+  body.bare #panel, body.bare #note { display: none; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .label { color: var(--dim); font-size: 12px; margin-right: 2px; }
+  button, select {
+    font: inherit; color: var(--text); background: var(--raised);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  }
+  select { padding: 3px 6px; }
+  button:hover, select:hover { border-color: var(--hover); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--glow); outline-offset: 1px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; }
+  .seg button:first-child { border-left: 0; }
+  .seg button[aria-pressed="true"] { background: var(--on); color: var(--glow); }
+  input[type=range] { width: 110px; accent-color: var(--glow); }
+  output { min-width: 3em; font: 12px Consolas, 'Cascadia Mono', monospace; }
+  #status {
+    flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 18px;
+    padding-top: 7px; border-top: 1px solid var(--line);
+    color: var(--dim); font: 12px/1.45 Consolas, 'Cascadia Mono', monospace;
+  }
+  #status b { color: var(--text); font-weight: normal; }
+  .dot { display: inline-block; width: 8px; height: 8px; margin: 0 5px 0 4px; border-radius: 50%; }
+  #msg { color: var(--glow); }
+  #keys { margin-left: auto; }
+  a.link { color: var(--glow); margin-left: 4px; }
+</style>
+</head>
+<body>
+<div id="note" hidden>This page was opened from a file, so its buttons can't reach the wallpaper.
+  Run <code>node tools/serve.js</code> and open <code>http://localhost:5173/</code> instead.</div>
+<div id="stage"><iframe id="wp" title="Wallpaper"></iframe><div id="hint">H brings the controls back</div></div>
+<div id="panel">
+  <div class="group" title="The wallpaper's own settings, applied the way Wallpaper Engine applies them">
+    <span class="label">Centre</span>
+    <div class="seg" data-key="centre"><button data-v="makise">Makise</button><button data-v="time">Time</button><button data-v="date">Date</button><button data-v="worldline">Worldline</button></div>
+  </div>
+  <div class="group" title="The centrepiece's glow: Makise's backlight, or the tubes' bloom. 50 as designed">
+    <span class="label">Glow</span>
+    <input data-key="glow" type="range" min="0" max="100" step="5" aria-label="Glow strength"><output></output>
+    <span class="label">size</span>
+    <input data-key="glowSize" type="range" min="0" max="100" step="5" aria-label="Glow size"><output></output>
+  </div>
+  <div class="group" title="How strong the ink is. 50 as designed">
+    <span class="label">Ink</span>
+    <input data-key="ink" type="range" min="0" max="100" step="5" aria-label="Ink strength"><output></output>
+  </div>
+  <div class="group" title="How strong the printed texture is: the mottled backdrop, the halftone patches and the worn print over everything. 50 as designed">
+    <span class="label">Texture</span>
+    <input data-key="texture" type="range" min="0" max="100" step="5" aria-label="Texture strength"><output></output>
+  </div>
+  <div class="group" title="How bright the schematics behind everything are: one faint drafting drawing, slowly redrawing itself. 0 turns it off, 50 as designed">
+    <span class="label">Schematic</span>
+    <input data-key="schematic" type="range" min="0" max="100" step="5" aria-label="Schematic strength"><output></output>
+  </div>
+  <div class="group">
+    <span class="label">Motion</span>
+    <div class="seg" data-key="motion"><button data-v="true">On</button><button data-v="false">Off</button></div>
+  </div>
+  <div class="group">
+    <span class="label">Parallax</span>
+    <div class="seg" data-key="parallax"><button data-v="true">On</button><button data-v="false">Off</button></div>
+  </div>
+  <div class="group">
+    <span class="label">Shifts</span>
+    <div class="seg" data-key="shift"><button data-v="true">On</button><button data-v="false">Off</button></div>
+  </div>
+  <div class="group">
+    <span class="label">Now</span>
+    <button data-act="shift" title="Worldline shift (S)">Shift</button>
+    <button data-act="click" title="A click on the desktop (C)">Click</button>
+    <button data-act="pause" id="pause" title="Pause the way the host does (P)">Pause</button>
+  </div>
+  <div class="group">
+    <span class="label">Throw ink</span>
+    <button data-ink="blot" title="Form a blot now (1)">Blot</button>
+    <button data-ink="grit" title="Form a patch of grungy texture now (2)">Grit</button>
+    <button data-ink="splash" title="Throw a splash now (3)">Splash</button>
+  </div>
+  <div class="group">
+    <span class="label">Speed</span>
+    <div class="seg" data-key="speed"><button data-v="1">1×</button><button data-v="5">5×</button><button data-v="25">25×</button></div>
+  </div>
+  <div class="group" title="How the ink is laid on">
+    <span class="label">Paint</span>
+    <div class="seg" data-key="blend"><button data-v="screen">Screen</button><button data-v="overlay">Overlay</button></div>
+  </div>
+  <div class="group">
+    <span class="label">Screen</span>
+    <select id="screen" aria-label="Screen size"></select>
+    <span class="label" id="scale"></span>
+  </div>
+  <div class="group">
+    <button data-act="restart" title="Start the wallpaper again with the same ink">Restart</button>
+    <button data-act="seed" title="Start again with different ink">New ink</button>
+    <button data-act="full" title="Full screen (F)">Full screen</button>
+    <button data-act="png" title="Save this frame at full size">Save PNG</button>
+    <a class="link" href="rig.html" title="Paint how Makise moves">Rig editor</a>
+  </div>
+  <div id="status"><span id="info">loading…</span><span id="msg"></span><span id="keys">S shift · C click · 1–3 ink · P pause · H hide · F full screen</span></div>
+</div>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const wp = $('#wp'), stage = $('#stage');
+const dpr = window.devicePixelRatio || 1;
+
+// What the preview remembers lives in its own query string, so a reload (or a copied
+// link) comes back to the same view. Paint left unset follows the wallpaper's default.
+const q = new URLSearchParams(location.search);
+const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
+const SETTINGS = ['centre', 'glow', 'glowSize', 'ink', 'texture', 'schematic', 'motion', 'parallax', 'shift'];
+const st = {
+  centre: ['makise', 'time', 'date', 'worldline'].includes(q.get('centre')) ? q.get('centre') : 'makise',
+  glow: num('glow', 50),
+  glowSize: num('glowSize', 50),
+  ink: num('ink', 50),
+  texture: num('texture', 50),
+  schematic: num('schematic', 50),
+  motion: q.get('motion') !== 'false',
+  parallax: q.get('parallax') !== 'false',
+  shift: q.get('shift') !== 'false',
+  speed: Number(q.get('speed')) || 1,
+  blend: q.get('blend'),
+  screen: q.get('screen') || 'mine',
+  seed: q.has('seed') ? Number(q.get('seed')) : Math.floor(Math.random() * 1e6),
+  paused: false,
+};
+let paint = { blend: 'screen' }; // the wallpaper's own, read once it loads
+
+function save() {
+  const p = new URLSearchParams();
+  for (const k of [...SETTINGS, 'speed', 'blend', 'screen', 'seed']) if (st[k] != null) p.set(k, st[k]);
+  history.replaceState(null, '', '?' + p);
+}
+
+// ---------- The simulated screen, scaled down to fit (never up) ----------
+const mine = [Math.round(screen.width * dpr), Math.round(screen.height * dpr)];
+const SCREENS = [
+  ['mine', `Your screen · ${mine[0]}×${mine[1]}`],
+  ['1920x1080', '1920×1080 · 1080p'],
+  ['2560x1440', '2560×1440 · 1440p'],
+  ['3840x2160', '3840×2160 · 4K'],
+  ['3440x1440', '3440×1440 · ultrawide'],
+  ['2560x1600', '2560×1600 · 16:10'],
+  ['window', 'Fill this window'],
+];
+const sel = $('#screen');
+for (const [v, label] of SCREENS) sel.add(new Option(label, v));
+if (!SCREENS.some(s => s[0] === st.screen)) st.screen = 'mine';
+sel.value = st.screen;
+
+function fit() {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  let w = sw, h = sh;
+  if (st.screen !== 'window') {
+    const [W, H] = st.screen === 'mine' ? mine : st.screen.split('x').map(Number);
+    w = W / dpr; h = H / dpr; // CSS px, so the wallpaper renders W×H device pixels
+  }
+  const k = Math.min(1, sw / w, sh / h);
+  wp.style.width = `${w}px`;
+  wp.style.height = `${h}px`;
+  wp.style.transform = `translate(${(sw - w * k) / 2}px, ${(sh - h * k) / 2}px) scale(${k})`;
+  $('#scale').textContent = k < 0.999 ? `shown at ${Math.round(k * 100)}%` : 'actual size';
+}
+new ResizeObserver(fit).observe(stage);
+sel.addEventListener('change', () => { st.screen = sel.value; save(); fit(); sel.blur(); });
+
+// ---------- The wallpaper ----------
+function win() { try { return wp.contentWindow.SG ? wp.contentWindow : null; } catch (e) { return null; } }
+const SG = () => win()?.SG;
+
+function load() {
+  const p = new URLSearchParams({ seed: st.seed, speed: st.speed });
+  for (const k of SETTINGS) p.set(k, st[k]);
+  if (st.blend) p.set('inkBlend', st.blend);
+  $('#info').textContent = 'loading…';
+  wp.src = `../wallpaper/index.html?${p}`;
+}
+
+wp.addEventListener('load', () => {
+  const w = win();
+  if (!w) { $('#note').hidden = false; $('#info').textContent = 'controls unavailable'; return; }
+  w.addEventListener('keydown', onKey);
+  paint = w.SG.state().paint;
+  if (st.paused) w.wallpaperPropertyListener.setPaused(true);
+  sync();
+});
+
+// ---------- Controls ----------
+function current(key) {
+  if (key === 'blend') return st.blend || paint.blend;
+  return st[key];
+}
+
+function sync() {
+  for (const seg of document.querySelectorAll('.seg')) {
+    const v = String(current(seg.dataset.key));
+    for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === v));
+  }
+  for (const r of document.querySelectorAll('input[data-key]')) {
+    r.value = st[r.dataset.key];
+    r.nextElementSibling.value = st[r.dataset.key];
+  }
+  $('#pause').textContent = st.paused ? 'Resume' : 'Pause';
+}
+
+for (const seg of document.querySelectorAll('.seg')) {
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const key = seg.dataset.key, raw = b.dataset.v;
+    const v = raw === 'true' ? true : raw === 'false' ? false : key === 'speed' ? Number(raw) : raw;
+    st[key] = v;
+    save();
+    sync();
+    const w = win();
+    if (!w) return;
+    if (key === 'speed') w.SG.speed(v);
+    else if (key === 'blend') w.SG.paint({ blend: v });
+    else w.wallpaperPropertyListener.applyUserProperties({ [key]: { value: v } });
+  });
+}
+
+for (const r of document.querySelectorAll('input[data-key]')) {
+  r.addEventListener('input', () => {
+    const key = r.dataset.key;
+    st[key] = Number(r.value);
+    save();
+    sync();
+    win()?.wallpaperPropertyListener.applyUserProperties({ [key]: { value: st[key] } });
+  });
+}
+
+function say(text) {
+  $('#msg').textContent = text;
+  clearTimeout(say.timer);
+  say.timer = setTimeout(() => { $('#msg').textContent = ''; }, 4000);
+}
+
+const actions = {
+  shift() { if (!st.shift) return say('Shifts are off in the settings'); SG()?.shift(); },
+  click() { if (!st.shift) return say('With shifts off, clicks do nothing'); SG()?.click(); },
+  pause() {
+    st.paused = !st.paused;
+    win()?.wallpaperPropertyListener.setPaused(st.paused);
+    sync();
+  },
+  ink(kind) {
+    const s = SG();
+    if (s && !s.ink(kind)) say('No free spot for new ink yet: wait for one to finish dissolving');
+  },
+  restart() { load(); },
+  seed() { st.seed = Math.floor(Math.random() * 1e6); save(); load(); },
+  full() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else stage.requestFullscreen?.().catch(() => say('Full screen is not allowed here'));
+  },
+  hide() {
+    document.body.classList.toggle('bare');
+    $('#hint').classList.toggle('show', document.body.classList.contains('bare'));
+    clearTimeout(actions.hint);
+    actions.hint = setTimeout(() => $('#hint').classList.remove('show'), 2500);
+  },
+  png() {
+    const w = win();
+    if (!w) return;
+    const s = w.SG.state();
+    w.document.getElementById('c').toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `divergence-meter-seed${s.seed}-${Math.round(s.t)}s.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    });
+  },
+};
+document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
+document.querySelectorAll('[data-ink]').forEach(b => b.addEventListener('click', () => actions.ink(b.dataset.ink)));
+
+const KEYS = { s: 'shift', c: 'click', p: 'pause', h: 'hide', f: 'full' };
+const INK_KEYS = { 1: 'blot', 2: 'grit', 3: 'splash' };
+function onKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (e.target.closest?.('input, select, textarea')) return;
+  const k = e.key.toLowerCase();
+  if (KEYS[k]) actions[KEYS[k]]();
+  else if (INK_KEYS[k]) actions.ink(INK_KEYS[k]);
+  else return;
+  e.preventDefault();
+}
+window.addEventListener('keydown', onKey);
+
+// ---------- Status: what the tubes and the ink are doing ----------
+let rate = { frames: 0, at: performance.now(), fps: 0 };
+function status() {
+  const s = SG()?.state();
+  if (!s) return;
+  const now = performance.now();
+  if (now - rate.at >= 1000) rate = { frames: s.frames, at: now, fps: Math.max(0, (s.frames - rate.frames) * 1000 / (now - rate.at)) };
+  const clock = `${Math.floor(s.t / 60)}:${String(Math.floor(s.t % 60)).padStart(2, '0')}`;
+  const ink = s.ink.map(b => `<span class="dot" style="background:rgb(${b.rgb})"></span>${b.color} ${b.kind}${b.phase === 'resting' ? '' : ` (${b.phase})`}`).join(' ');
+  $('#info').innerHTML = [
+    `worldline <b>${s.worldline}</b>`,
+    `ink ${ink || 'none yet'}`,
+    `<b>${clock}</b> in${s.speed !== 1 ? ` at ${s.speed}×` : ''}`,
+    s.running ? `<b>${Math.round(rate.fps)}</b> fps${s.ms ? `, <b>${s.ms.toFixed(1)}</b> ms a frame` : ''}` : '<b>paused</b>',
+    `seed ${s.seed}`,
+  ].join(' · ');
+}
+setInterval(status, 250);
+
+save();
+sync();
+fit();
+load();
+if (location.protocol === 'file:') $('#note').hidden = false;
+</script>
+</body>
+</html>

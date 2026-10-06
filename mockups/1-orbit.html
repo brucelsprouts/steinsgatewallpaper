@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mockup 1 — Orbit</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas>
+<script src="sg.js"></script>
+<script>
+const ctx = SG.stage();
+const W = 2560, H = 1440, cx = W / 2, cy = H / 2;
+SG.background(ctx, { warmAt: [cx, cy, 900] });
+
+// A single large dial orbiting the meter, with a faint outer track.
+SG.layer(ctx, g => {
+  SG.drawClock(g, { x: cx, y: cy, r: 600, alpha: 0.11, rot: -0.12, time: 10 * 3600 + 48 * 60 + 59 });
+  g.strokeStyle = 'rgba(196,170,140,0.05)';
+  g.lineWidth = 1;
+  g.setLineDash([2, 14]);
+  g.beginPath(); g.arc(cx, cy, 690, 0, SG.TAU); g.stroke();
+  g.setLineDash([]);
+  g.beginPath(); g.arc(cx, cy, 720, -2.2, -0.6); g.stroke();
+}, { blur: 1.2 });
+
+// A small gear riding the outer track like a moon.
+SG.layer(ctx, g => {
+  const a = -0.95;
+  SG.drawGear(g, { x: cx + Math.cos(a) * 690, y: cy + Math.sin(a) * 690, r: 46, teeth: 18, alpha: 0.16, spokes: 4 });
+}, { blur: 0.6 });
+
+SG.drawMeter(ctx, { cx, cy, tubeH: 200, text: '1.048596' });
+SG.dust(ctx, { seed: 3, count: 180, near: [cx, cy, 300] });
+SG.vignette(ctx, 0.9);
+SG.dither(ctx);
+</script></body></html>

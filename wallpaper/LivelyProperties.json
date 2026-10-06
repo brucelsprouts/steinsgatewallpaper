@@ -1,0 +1,63 @@
+{
+  "centre": {
+    "type": "dropdown",
+    "value": 0,
+    "text": "Centrepiece",
+    "items": ["Makise Kurisu", "Nixie meter: time", "Nixie meter: date", "Nixie meter: worldline"]
+  },
+  "glow": {
+    "type": "slider",
+    "value": 50,
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "text": "Glow strength"
+  },
+  "glowSize": {
+    "type": "slider",
+    "value": 50,
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "text": "Glow size"
+  },
+  "ink": {
+    "type": "slider",
+    "value": 50,
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "text": "Ink strength"
+  },
+  "texture": {
+    "type": "slider",
+    "value": 50,
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "text": "Texture strength"
+  },
+  "schematic": {
+    "type": "slider",
+    "value": 50,
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "text": "Schematic strength"
+  },
+  "motion": {
+    "type": "checkbox",
+    "value": true,
+    "text": "Makise motion"
+  },
+  "parallax": {
+    "type": "checkbox",
+    "value": true,
+    "text": "Cursor parallax"
+  },
+  "shift": {
+    "type": "checkbox",
+    "value": true,
+    "text": "Worldline shifts"
+  }
+}

@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- Ink lab (needs tools/serve.js): elements of living ink in isolation, for tuning.
+     mode=sheet (six at rest) | form (one forming) | fade (one dissolving) | one (actual size)
+     kind=blot|grit|splash (default: a mix)  seed=1  S=0.42 (scale)  gain=1 (opacity) -->
+<html><head><meta charset="utf-8"><title>ink lab</title>
+<style>html, body { margin: 0; background: #040303; } canvas { display: block; }</style></head>
+<body><canvas id="c" width="2560" height="1440"></canvas>
+<script src="../wallpaper/js/kit.js"></script>
+<script src="../wallpaper/js/paint.js"></script>
+<script src="../wallpaper/js/ink.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const mode = q.get('mode') || 'sheet', seed = Number(q.get('seed') || 1), gain = Number(q.get('gain') || 1);
+const kinds = q.get('kind') ? [q.get('kind')] : ['blot', 'grit', 'splash', 'blot', 'splash', 'grit'];
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+ctx.fillStyle = '#040303';
+ctx.fillRect(0, 0, cv.width, cv.height);
+
+function label(s, x, y) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#ccc';
+  ctx.font = '20px Consolas, monospace';
+  ctx.fillText(s, x, y);
+  ctx.globalAlpha = 1;
+}
+
+const field = new Ink.Field(Kit.rng(seed), { x: 0, y: 0 });
+const S = mode === 'one' ? 1 : Number(q.get('S') || 0.42);
+field.build(S);
+let n = 0;
+function element() {
+  const b = field.spawn(0, kinds[n++ % kinds.length]);
+  Object.assign(b, { x: 0, y: 0, alpha: b.alpha * gain });
+  field.finish(b);
+  field.blooms = []; // free its zone and colour for the next one
+  return b;
+}
+const at = (b, phase, p) => b.born + { forming: p * b.form, drying: b.form + p * b.dry, resting: b.form + b.dry + 30, fading: b.form + b.dry + b.rest + p * b.fade }[phase];
+const view = (cx, cy) => ({ S, ox: cx, oy: cy, W: cv.width, H: cv.height });
+function show(b, cx, cy, t) {
+  field.blooms = [b];
+  field.frame(t);
+  field.draw(ctx, view(cx, cy), t, 'under', () => true);
+  field.draw(ctx, view(cx, cy), t, 'over', () => true);
+}
+
+if (mode === 'sheet') {
+  const made = Array.from({ length: 6 }, element);
+  made.forEach((b, i) => {
+    const cx = 427 + (i % 3) * 853, cy = 360 + Math.floor(i / 3) * 720;
+    show(b, cx, cy, at(b, 'resting'));
+    label(`${b.kind}  ${b.color}/${b.color2}  R${Math.round(b.R)}  drops ${b.drops}  a ${b.alpha.toFixed(2)}`, cx - 400, cy + 340);
+  });
+} else if (mode === 'form' || mode === 'fade') {
+  const b = element();
+  const ps = mode === 'form' ? [0.01, 0.04, 0.1, 0.2, 0.35, 0.55, 0.8, 1] : [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 0.99];
+  ps.forEach((p, i) => {
+    const cx = 320 + (i % 4) * 640, cy = 360 + Math.floor(i / 4) * 720;
+    const t = p === 1 ? at(b, 'drying', 0) : at(b, mode === 'form' ? 'forming' : 'fading', p);
+    show(b, cx, cy, t);
+    label(`${b.kind} ${mode} ${p}  (t ${(t - b.born).toFixed(1)} s)`, cx - 300, cy + 330);
+  });
+} else {
+  const b = element();
+  show(b, 1280, 720, at(b, 'resting'));
+  label(`${b.kind}  ${b.color}/${b.color2}  R${Math.round(b.R)}  a ${b.alpha.toFixed(2)}`, 40, 1400);
+}
+document.title = 'ink lab ready';
+</script>
+</body></html>
