@@ -11,7 +11,7 @@ Rig.add({
     {"kind":"wave","name":"Coat flutter","hold":true,"mask":[1,2],"amount":0.8,"length":270,"speed":56,"dir":62,"gust":3.5,"vary":0},
     {"kind":"breathe","name":"Breath","hold":false,"mask":[2,0],"amount":0.9,"dir":270,"period":4.8},
     {"kind":"parallax","name":"Head","hold":false,"mask":[2,1],"amount":3},
-    {"kind":"blink","name":"Blink","mask":[2,2],"lid":[3,0],"every":5,"span":0.16,"twice":0.15,"dir":90,"shade":0.3,"skin":[425,172]},
+    {"kind":"blink","name":"Blink","on":false,"mask":[2,2],"lid":[3,0],"every":5,"span":0.16,"twice":0.15,"dir":90,"shade":0.3,"skin":[425,172]},
     {"kind":"swing","name":"Left forearm","hold":true,"mask":[3,1],"gain":1.1,"wind":1,"hz":0.5,"damp":0.11,"max":2,"idle":2,"length":290,"pivot":[640,560]},
     {"kind":"sway","name":"Coat hem","hold":true,"mask":[3,2],"gain":1.1,"wind":2.3,"hz":1.36,"damp":0.32,"max":11,"idle":10.1},
     {"kind":"swing","name":"Tie","hold":false,"mask":[4,0],"gain":1.2,"wind":1.2,"hz":0.7,"damp":0.25,"max":2.5,"idle":0,"length":325,"pivot":[425,292]}
